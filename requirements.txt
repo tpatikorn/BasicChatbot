@@ -1,0 +1,3 @@
+flask
+huggingface-hub
+python-dotenv

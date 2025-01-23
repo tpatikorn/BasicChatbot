@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Chatbot</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 20px;
+        }
+
+        #response {
+            margin-top: 20px;
+            white-space: pre-wrap;
+        }
+    </style>
+</head>
+<body>
+<h1>Chatbot</h1>
+<textarea id="prompt" placeholder="Enter your prompt here..." rows="4" cols="50"></textarea><br><br>
+<button id="submit">Submit</button>
+<div id="response"></div>
+
+<script>
+    document.getElementById('submit').addEventListener('click', async () => {
+        const prompt = document.getElementById('prompt').value;
+        const responseDiv = document.getElementById('response');
+        responseDiv.textContent = "Generating...";
+
+        try {
+            const response = await fetch('generate', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({prompt})
+            });
+
+            const data = await response.json();
+            if (response.ok) {
+                responseDiv.textContent = data.response;
+            } else {
+                responseDiv.textContent = `Error: ${data.error}`;
+            }
+        } catch (error) {
+            responseDiv.textContent = `Error: ${error.message}`;
+        }
+    });
+</script>
+</body>
+</html>
