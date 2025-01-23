@@ -3,11 +3,17 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.0/socket.io.min.js"></script>
     <title>Chatbot</title>
     <style>
         body {
             font-family: Arial, sans-serif;
             margin: 20px;
+        }
+
+        div {
+            border: 1px solid red;
+            margin: 1px;
         }
 
         #response {
@@ -21,12 +27,29 @@
 <textarea id="prompt" placeholder="Enter your prompt here..." rows="20" cols="100"></textarea><br><br>
 <button id="submit">Submit</button>
 <div id="response"></div>
+<div id="word-container"></div>
 
 <script>
+    const socket = io();
+
+    socket.on('connect', function () {
+        console.log('Connected to server');
+    });
+
+    socket.on('new_word', function (word) {
+        console.log("new_word: " + word);
+        const wordContainer = document.getElementById('word-container');
+        const wordElement = document.createElement('span');
+        wordElement.textContent = word + ' ';
+        wordContainer.appendChild(wordElement);
+    });
+
     document.getElementById('submit').addEventListener('click', async () => {
         const prompt = document.getElementById('prompt').value;
         const responseDiv = document.getElementById('response');
+        const wordContainer = document.getElementById('word-container');
         responseDiv.textContent = "Generating...";
+        wordContainer.textContent = "";
 
         try {
             const response = await fetch('generate', {

@@ -1,3 +1,5 @@
 flask
 huggingface-hub
 python-dotenv
+flask-socketio
+eventlet
