@@ -11,9 +11,17 @@
             margin: 20px;
         }
 
-        div {
-            border: 1px solid red;
-            margin: 1px;
+        .outerbox {
+            margin: 5px;
+            padding: 5px;
+            width: 45%;
+        }
+
+        .textbox {
+            border: 1px solid black;
+            margin: 5px;
+            padding: 5px;
+            width: 100%;
         }
 
         #response {
@@ -24,10 +32,29 @@
 </head>
 <body>
 <h1>Chatbot</h1>
-<textarea id="prompt" placeholder="Enter your prompt here..." rows="20" cols="100"></textarea><br><br>
+<textarea id="prompt" rows="20" cols="100">
+Can you help me grade this question and give 1 to 5 score?
+
+Question:
+Question: when writing C if, what is in side the parenthesis if(...)?
+
+Correct Answer:
+The condition that dictates whether the following statement will execute.
+
+The Student's Answer:
+You would write a C if statement that only checks if the number is greater than zero without specifying what the statement should do.
+</textarea><br><br>
 <button id="submit">Submit</button>
-<div id="response"></div>
-<div id="word-container"></div>
+<div id="content" style="display:flex">
+    <div class="outerbox">
+        <h1>Response Stream</h1>
+        <div id="word-container" class="textbox"></div>
+    </div>
+    <div class="outerbox">
+        <h1>Final Response</h1>
+        <div id="response" class="textbox"></div>
+    </div>
+</div>
 
 <script>
     const socket = io();
