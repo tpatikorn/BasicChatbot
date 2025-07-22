@@ -3,3 +3,10 @@ huggingface-hub
 python-dotenv
 flask-socketio
 eventlet
+google-genai
+google-cloud-speech
+SpeechRecognition
+pydub
+pyaudio
+
+

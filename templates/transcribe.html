@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Meeting Transcription and Summarization</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.0/socket.io.min.js"></script>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      margin: 20px;
+    }
+
+    .outerbox {
+      margin: 5px;
+      padding: 5px;
+      width: 80%;
+      min-height: 300px;
+    }
+
+    .textbox {
+      border: 1px solid black;
+      margin: 5px;
+      padding: 5px;
+      width: 100%;
+      min-height: 100%;
+    }
+  </style>
+  <script>
+    let recognition;
+    let isTranscribing = false;
+
+    function startTranscribing() {
+      if ('webkitSpeechRecognition' in window) {
+        recognition = new webkitSpeechRecognition();
+        recognition.continuous = true;
+        recognition.interimResults = true;
+        recognition.lang = 'th-TH';
+        let outputDom = document.getElementById('output');
+        outputDom.innerHTML += "<span></span>"
+
+        recognition.onresult = function (event) {
+          let childDom = outputDom.children[outputDom.children.length - 1];
+          let finalText = '';
+          let transcription = '';
+          for (let i = event.resultIndex; i < event.results.length; i++) {
+            if (event.results[i].isFinal) {
+              finalText += event.results[i][0].transcript; // Only process final results
+            }
+            transcription += event.results[i][0].transcript;
+            childDom.innerText = transcription;
+          }
+          if (finalText) {
+            childDom.innerText = finalText + '\n'; // Append finalized text
+            outputDom.innerHTML += "<span></span>"
+          }
+        };
+
+        recognition.onerror = function (event) {
+          console.error('Speech recognition error:', event.error);
+        };
+
+        recognition.onend = function () {
+          if (isTranscribing) {
+            document.getElementById('output').innerHTML += "<span></span>"
+            recognition.start();
+          }
+        };
+
+        isTranscribing = true;
+        recognition.start();
+
+        document.getElementById('start-btn').style.display = 'none';
+        document.getElementById('stop-btn').style.display = 'block';
+      } else {
+        alert('Speech recognition not supported in this browser. Try Chrome!');
+      }
+    }
+
+    function stopTranscribing() {
+      if (recognition) {
+        recognition.stop();
+        isTranscribing = false;
+      }
+
+      document.getElementById('start-btn').style.display = 'block';
+      document.getElementById('stop-btn').style.display = 'none';
+    }
+  </script>
+</head>
+<body>
+<div id="content">
+  <div class="outerbox">
+    <h1>Meeting Transcription</h1>
+    <button id="start-btn" onclick="startTranscribing()">Start Transcribing</button>
+    <button id="stop-btn" style="display: none;" onclick="stopTranscribing()">Stop Transcribing</button>
+    <button id="submit">Summarize</button>
+    <div id="output" class="textbox">
+      พร้อมภาพใบเสร็จนะครับก็หลังจากถอดข้อมูลจากภาพใบเสร็จแล้วเนี่ยก็ควรที่จะทำออกมาเป็นสมุดบัญชีนะครับว่าค่าใช้จ่ายในแต่ละวันเป็นอย่างไรน้องถอดวันที่ถอดค่าใช้จ่ายต่างๆนะครับออกจากใบเสร็จรอแล้วก็ใช้
+      AI Machine Running ในการประมวลผลแล้วก็พยากรณ์คาดการณ์ล่วงหน้าว่าค่าใช้จ่ายในแต่ละเดือนเป็นอย่างไรนะครับ
+    </div>
+  </div>
+  <div class="outerbox">
+    <h1>Meeting Summary</h1>
+    <div id="word-container" class="textbox"></div>
+  </div>
+</div>
+
+
+<script>
+  const socket = io();
+
+  socket.on('connect', function () {
+    console.log('Connected to server');
+  });
+
+  socket.on('new_word', function (word) {
+    // console.log("new_word: " + word);
+    const wordContainer = document.getElementById('word-container');
+    wordContainer.textContent += word + ' ';
+  });
+
+  document.getElementById('submit').addEventListener('click', async () => {
+    const prompt = document.getElementById("output").innerText;
+    const wordContainer = document.getElementById('word-container');
+    wordContainer.textContent = "";
+
+    try {
+      const response = await fetch('llm/summarize', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({prompt})
+      });
+
+      const data = await response.json();
+      if (response.ok) {
+        wordContainer.innerHTML = "";
+        const responses = data.response.split(/(\*|\n)/);
+        for (let i = 0; i < responses.length; i++) {
+          if (responses[i] === "*") {
+            continue;
+          }
+          if (responses[i] === "\n") {
+            continue;
+          }
+          wordContainer.innerHTML += responses[i] + "<br>";
+        }
+      } else {
+        wordContainer.textContent = `Error: ${data.error}`;
+      }
+    } catch (error) {
+      wordContainer.textContent = `Error: ${error.message}`;
+    }
+  });
+</script>
+</body>
+</html>
