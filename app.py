@@ -42,13 +42,15 @@ context = ""
 with open("text/context.txt", "r", encoding="utf8") as f:
     for line in f:
         context += line
-print(context)
 
-question = ""
-with open("text/question.txt", "r", encoding="utf8") as f:
-    for line in f:
-        question += line
-print(question)
+
+# print(context)
+
+# question = ""
+# with open("text/question.txt", "r", encoding="utf8") as f:
+#    for line in f:
+#        question += line
+# print(question)
 
 
 @bp.route('/')
@@ -56,7 +58,12 @@ def chatbot():
     return render_template('chatbot.html')
 
 
-@socketio.on('connect')
+@socketio.on('test_connection', namespace="/llm")
+def handle_connectx():
+    print("test_connection")
+
+
+@socketio.on('connect', namespace="/llm")
 def handle_connect():
     print("Client connected")
 
@@ -77,7 +84,7 @@ def process_prompt(prompt, model):
                     r = r.text
                 print(r, end=" ")
                 final_text += r
-                socketio.emit('new_word', r, namespace="/")
+                socketio.emit('new_word', r, namespace="/llm")
                 socketio.sleep(0)  # force the server to flush the socketio. DO NOT REMOVE
             except UnicodeEncodeError as e:  # some weird characters happen. let's just... ignore it lol
                 final_text += "?"
@@ -115,7 +122,7 @@ def generate_text():
 
     prompt = {
         "system_prompt": system_prompt,
-        "question": question,
+        # "question": question,
         "memory": memory,
         "user_prompt": data['prompt']
     }
@@ -146,13 +153,13 @@ def background_recognition():
         stop_listening = recognizer.listen_in_background(source, callback)
 
 
-@socketio.on('start_transcribing')
+@socketio.on('start_transcribing', namespace="/llm")
 def start_transcribing():
     global stop_listening
     threading.Thread(target=background_recognition).start()
 
 
-@socketio.on('stop_transcribing')
+@socketio.on('stop_transcribing', namespace="/llm")
 def stop_transcribing():
     global stop_listening
     if stop_listening:
@@ -163,4 +170,4 @@ app.register_blueprint(bp, url_prefix='/llm')
 app.config['APPLICATION_ROOT'] = ''
 app.config['SECRET_KEY'] = 'secret!'
 if __name__ == "__main__":
-    socketio.run(app, debug=True, port=11111)
+    socketio.run(app, debug=True, port=8084)

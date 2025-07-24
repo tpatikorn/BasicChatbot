@@ -47,7 +47,8 @@
 </div>
 
 <script>
-    const socket = io();
+    const socket = io('/llm', {path: '/llm/socket.io'});
+    socket.emit("test_connection");
 
     socket.on('connect', function () {
         console.log('Connected to server');
