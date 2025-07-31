@@ -8,7 +8,12 @@
     <style>
         body {
             font-family: Arial, sans-serif;
-            margin: 20px;
+            margin: 30px;
+        }
+
+        textarea {
+            font-size: 24px;
+            border-radius: 10px;
         }
 
         .outerbox {
@@ -22,6 +27,8 @@
             margin: 5px;
             padding: 5px;
             width: 100%;
+            border-radius: 10px;
+            min-height: 30px;
         }
 
         #response {
@@ -32,7 +39,8 @@
 </head>
 <body>
 <h1>Chatbot</h1>
-<textarea id="prompt" rows="20" cols="100">
+<label for="passcode">passcode</label><input id="passcode"><br><br>
+<textarea id="prompt" rows="5" cols="60">
 คนไข้มะเร็งควรกินอะไรบ้างระหว่างทำคีโม</textarea><br><br>
 <button id="submit">Submit</button>
 <div id="content" style="display:flex">
@@ -64,6 +72,7 @@
 
     document.getElementById('submit').addEventListener('click', async () => {
         const prompt = document.getElementById('prompt').value;
+        const passcode = document.getElementById('passcode').value;
         const responseDiv = document.getElementById('response');
         const wordContainer = document.getElementById('word-container');
         responseDiv.textContent = "Generating...";
@@ -73,7 +82,7 @@
             const response = await fetch('generate', {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({prompt})
+                body: JSON.stringify({"prompt": prompt, "passcode": passcode})
             });
 
             const data = await response.json();

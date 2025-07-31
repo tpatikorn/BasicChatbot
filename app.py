@@ -119,11 +119,13 @@ def generate_text():
     data = request.json
     if not data or 'prompt' not in data:
         return jsonify({"error": "Invalid input, 'prompt' is required"}), 400
+    if 'passcode' not in data or data['passcode'] != "Aj.Nune<3":
+        print(data['passcode'])
+        return jsonify({"error": "Invalid passcode"}), 400
 
     prompt = {
         "system_prompt": system_prompt,
-        # "question": question,
-        "memory": memory,
+        "context": context,
         "user_prompt": data['prompt']
     }
     prompt = json.dumps(prompt, ensure_ascii=False)
