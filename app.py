@@ -36,7 +36,7 @@ system_prompt = ""
 with open("text/system_prompt.txt", "r", encoding="utf8") as f:
     for line in f:
         system_prompt += line
-print(system_prompt)
+# print(system_prompt)
 
 context = ""
 with open("text/context.txt", "r", encoding="utf8") as f:
@@ -132,7 +132,7 @@ def generate_text():
     return process_prompt(prompt, model)
 
 
-@app.route('/transcribe')
+@bp.route('/transcribe')
 def transcribe():
     return render_template('transcribe.html')
 

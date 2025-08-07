@@ -8,5 +8,7 @@ google-cloud-speech
 SpeechRecognition
 pydub
 pyaudio
+line-bot-sdk
+
 
 
