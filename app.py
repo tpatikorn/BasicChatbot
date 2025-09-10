@@ -52,7 +52,7 @@ with open(os.path.join(script_dir, "text/system_prompt.txt"), "r", encoding="utf
         system_prompt += line
 
 context = ""
-with open(os.path.join(script_dir, "text/context.txt", "r"), encoding="utf8") as f:
+with open(os.path.join(script_dir, "text/context.txt"), "r", encoding="utf8") as f:
     for line in f:
         context += line
 
@@ -178,6 +178,7 @@ def handle_message(event):
 
 
 def reply_message(reply_token, text):
+    print(text)
     with ApiClient(configuration) as api_client:
         line_bot_api = MessagingApi(api_client)
         line_bot_api.reply_message_with_http_info(
