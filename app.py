@@ -31,7 +31,7 @@ from linebot.v3.webhooks import (
 )
 
 bp = Blueprint('llm', __name__, template_folder='templates', static_folder='static', root_path="llm")
-env = dotenv.load_dotenv(".env")
+env = dotenv.load_dotenv()
 
 gemini_client = genai.Client(api_key=os.getenv('GEMINI_API_KEY'))
 configuration = Configuration(access_token=os.getenv("LINE_BOT_ACCESS_TOKEN"))
@@ -41,13 +41,18 @@ app = Flask(__name__)
 scheduler = BackgroundScheduler()
 CSV_PATH = 'schedule.csv'
 
+# need to do this so that the code can be run from any current working directory
+# otherwise the CLI may use current working directory instead of using
+# the relative project path
+script_dir = os.path.dirname(os.path.abspath(__file__))
+
 system_prompt = ""
-with open("text/system_prompt.txt", "r", encoding="utf8") as f:
+with open(os.path.join(script_dir, "text/system_prompt.txt"), "r", encoding="utf8") as f:
     for line in f:
         system_prompt += line
 
 context = ""
-with open("text/context.txt", "r", encoding="utf8") as f:
+with open(os.path.join(script_dir, "text/context.txt", "r"), encoding="utf8") as f:
     for line in f:
         context += line
 
@@ -139,7 +144,7 @@ def check_for_notification():
     now = datetime.now()
     one_hour_ago = now - timedelta(hours=1)
 
-    with open(CSV_PATH, newline='', encoding="utf-8") as csvfile:
+    with open(os.path.join(script_dir, CSV_PATH), newline='', encoding="utf-8") as csvfile:
         reader: Iterable[Dict] = csv.DictReader(csvfile)
         for row in reader:
             try:
@@ -182,21 +187,20 @@ def reply_message(reply_token, text):
             )
         )
 
-
 @app.before_request
 def log_request():
     print("Incoming request:", request.method, request.path)
 
+# because python debug is wonky and will start scheduler twice
+if os.environ.get('WERKZEUG_RUN_MAIN') == 'true':
+    scheduler.remove_all_jobs()
+    scheduler.add_job(check_for_notification, 'cron',
+                      id='notification_job', replace_existing=True, minute=51)
+    scheduler.start()
+
+app.register_blueprint(bp, url_prefix='/llm')
+app.config['APPLICATION_ROOT'] = ''
+app.config['SECRET_KEY'] = 'secret!'
 
 if __name__ == "__main__":
-    # because python debug is wonky and will start scheduler twice
-    if os.environ.get('WERKZEUG_RUN_MAIN') == 'true':
-        scheduler.remove_all_jobs()
-        scheduler.add_job(check_for_notification, 'cron',
-                          id='notification_job', replace_existing=True, minute=51)
-        scheduler.start()
-
-    app.register_blueprint(bp, url_prefix='/llm')
-    app.config['APPLICATION_ROOT'] = ''
-    app.config['SECRET_KEY'] = 'secret!'
     app.run(debug=True, port=8084)
