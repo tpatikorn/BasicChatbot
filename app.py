@@ -2,15 +2,17 @@
 import csv
 import json
 import os
+import threading
 from datetime import datetime, timedelta
-from typing import List, Dict, Iterable
+from socket import SocketIO
+from typing import Dict, Iterable
 
 import dotenv
-from flask import Flask, request, abort, Blueprint, jsonify
-from google.genai.types import GenerateContentConfig
-from google import genai
+import speech_recognition as sr
 from apscheduler.schedulers.background import BackgroundScheduler
-
+from flask import Flask, request, abort, Blueprint, jsonify, render_template
+from google import genai
+from google.genai.types import GenerateContentConfig
 from linebot.v3 import (
     WebhookHandler
 )
@@ -86,7 +88,8 @@ def generate_text(user_prompt):
 
 @bp.route("/callback", methods=['GET'])
 def callback_get():
-    return "callback ready for webhook"
+    response = generate_text("Hello. Are you ready to help?")
+    return "callback ready for webhook: " + response
 
 
 import re
@@ -188,9 +191,140 @@ def reply_message(reply_token, text):
             )
         )
 
+
 @app.before_request
 def log_request():
     print("Incoming request:", request.method, request.path)
+
+
+memory = "Nothing."
+recognizer = sr.Recognizer()
+stop_listening = None
+
+app = Flask(__name__)
+socketio = SocketIO(app)
+
+system_prompt = ""
+with open("text/system_prompt.txt", "r", encoding="utf8") as f:
+    for line in f:
+        system_prompt += line
+# print(system_prompt)
+
+context = ""
+with open("text/context.txt", "r", encoding="utf8") as f:
+    for line in f:
+        context += line
+
+
+# print(context)
+
+# question = ""
+# with open("text/question.txt", "r", encoding="utf8") as f:
+#    for line in f:
+#        question += line
+# print(question)
+
+
+@bp.route('/')
+def chatbot():
+    return render_template('chatbot.html')
+
+
+@socketio.on('test_connection', namespace="/llm")
+def handle_connectx():
+    print("test_connection")
+
+
+@socketio.on('connect', namespace="/llm")
+def handle_connect():
+    print("Client connected")
+
+
+def process_prompt(prompt, model):
+    result = gemini_client.models.generate_content_stream(
+        model="gemini-2.0-flash", contents=prompt, config=GenerateContentConfig(frequency_penalty=1.2))
+    final_text = ""
+    for r in result:
+        r = r.text
+        print(r, end=" ")
+        final_text += r
+        socketio.emit('new_word', r, namespace="/llm")
+        socketio.sleep(0)  # force the server to flush the socketio. DO NOT REMOVE
+    print()
+    # Assuming the result is a list of dictionaries
+    print(final_text)
+    return jsonify({"response": final_text}), 200
+
+
+@bp.route('/summarize', methods=['POST'])
+def summarize_text():
+    data = request.json
+    if not data or 'prompt' not in data:
+        return jsonify({"error": "Invalid input, 'prompt' is required"}), 400
+
+    prompt = {
+        "system_prompt": system_prompt,
+        "context": context,
+        "user_prompt": data['prompt']
+    }
+    prompt = json.dumps(prompt, ensure_ascii=False)
+    return process_prompt(prompt)
+
+
+@bp.route('/generate', methods=['POST'])
+def generate_text():
+    model = "GEMINI"
+    data = request.json
+    if not data or 'prompt' not in data:
+        return jsonify({"error": "Invalid input, 'prompt' is required"}), 400
+    if 'passcode' not in data or data['passcode'] != "Aj.Nune<3":
+        print(data['passcode'])
+        return jsonify({"error": "Invalid passcode"}), 400
+
+    prompt = {
+        "system_prompt": system_prompt,
+        "context": context,
+        "user_prompt": data['prompt']
+    }
+    prompt = json.dumps(prompt, ensure_ascii=False)
+    return process_prompt(prompt, model)
+
+
+@bp.route('/transcribe')
+def transcribe():
+    return render_template('transcribe.html')
+
+
+def background_recognition():
+    global stop_listening
+    mic = sr.Microphone()
+
+    with mic as source:
+        recognizer.adjust_for_ambient_noise(source)
+
+    def callback(recognizer, audio):
+        try:
+            text = recognizer.recognize_google(audio)
+            socketio.emit('transcription', {'text': text})
+        except sr.UnknownValueError:
+            socketio.emit('transcription', {'text': '[Unintelligible]'})
+
+    with mic as source:
+        stop_listening = recognizer.listen_in_background(source, callback)
+
+
+@socketio.on('start_transcribing', namespace="/llm")
+def start_transcribing():
+    global stop_listening
+    threading.Thread(target=background_recognition).start()
+
+
+@socketio.on('stop_transcribing', namespace="/llm")
+def stop_transcribing():
+    global stop_listening
+    if stop_listening:
+        stop_listening()
+
 
 # because python debug is wonky and will start scheduler twice
 if os.environ.get('WERKZEUG_RUN_MAIN') == 'true':
