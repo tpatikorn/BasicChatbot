@@ -40,7 +40,7 @@
 <body>
 <h1>Chatbot</h1>
 <label for="passcode">passcode</label><input id="passcode"><br><br>
-<textarea id="prompt" rows="5" cols="60">
+<label for="prompt">prompt</label><textarea id="prompt" rows="5" cols="60">
 คนไข้มะเร็งควรกินอะไรบ้างระหว่างทำคีโม</textarea><br><br>
 <button id="submit">Submit</button>
 <div id="content" style="display:flex">
@@ -55,7 +55,7 @@
 </div>
 
 <script>
-    const socket = io('/llm', {path: '/llm/socket.io'});
+    const socket = io('/llm');
     socket.emit("test_connection");
 
     socket.on('connect', function () {

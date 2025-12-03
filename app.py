@@ -2,35 +2,33 @@
 import csv
 import json
 import os
+import re
 import threading
 from datetime import datetime, timedelta
-from socket import SocketIO
 from typing import Dict, Iterable
 
 import dotenv
 import speech_recognition as sr
 from apscheduler.schedulers.background import BackgroundScheduler
 from flask import Flask, request, abort, Blueprint, jsonify, render_template
+from flask_socketio import SocketIO
 from google import genai
-from google.genai.types import GenerateContentConfig
-from linebot.v3 import (
-    WebhookHandler
-)
-from linebot.v3.exceptions import (
-    InvalidSignatureError
-)
+from linebot.v3 import WebhookHandler
+from linebot.v3.exceptions import InvalidSignatureError
 from linebot.v3.messaging import (
     Configuration,
     ApiClient,
     MessagingApi,
     ReplyMessageRequest,
     PushMessageRequest,
-    TextMessage
+    TextMessage, ShowLoadingAnimationRequest
 )
-from linebot.v3.webhooks import (
-    MessageEvent,
-    TextMessageContent
-)
+from linebot.v3.webhooks import MessageEvent, TextMessageContent
+
+# need to do this so that the code can be run from any current working directory
+# otherwise the CLI may use current working directory instead of using
+# the relative project path
+script_dir = os.path.dirname(os.path.abspath(__file__))
 
 bp = Blueprint('llm', __name__, template_folder='templates', static_folder='static', root_path="llm")
 env = dotenv.load_dotenv()
@@ -43,10 +41,13 @@ app = Flask(__name__)
 scheduler = BackgroundScheduler()
 CSV_PATH = 'schedule.csv'
 
-# need to do this so that the code can be run from any current working directory
-# otherwise the CLI may use current working directory instead of using
-# the relative project path
-script_dir = os.path.dirname(os.path.abspath(__file__))
+memory = "Nothing."
+recognizer = sr.Recognizer()
+stop_listening = False
+
+socketio = SocketIO(app)
+
+SOCKET_NAMESPACE = "/llm"
 
 system_prompt = ""
 with open(os.path.join(script_dir, "text/system_prompt.txt"), "r", encoding="utf8") as f:
@@ -60,20 +61,19 @@ with open(os.path.join(script_dir, "text/context.txt"), "r", encoding="utf8") as
 
 
 def process_prompt(prompt):
-    try:
-        result = gemini_client.models.generate_content_stream(
-            model="gemini-2.0-flash", contents=prompt, config=GenerateContentConfig(frequency_penalty=1.2))
-        final_text = ""
-        for r in result:
-            try:
-                final_text += r.text
-            except UnicodeEncodeError as e:  # some weird characters happen. let's just... ignore it lol
-                final_text += "?"
-        # Assuming the result is a list of dictionaries
-        print(final_text)
-        return final_text
-    except Exception as e:
-        return jsonify({"error": "Failed to fetch response from model", "details": str(e)}), 500
+    result = gemini_client.models.generate_content_stream(
+        model="gemini-2.5-flash", contents=prompt)
+    final_text = ""
+    for r in result:
+        r = r.text
+        print(r, end=" ")
+        final_text += r
+        socketio.emit('new_word', r, namespace=SOCKET_NAMESPACE)
+        socketio.sleep(0)  # force the server to flush the socketio. DO NOT REMOVE
+    print()
+    # Assuming the result is a list of dictionaries
+    print(final_text)
+    return final_text
 
 
 def generate_text(user_prompt):
@@ -88,11 +88,8 @@ def generate_text(user_prompt):
 
 @bp.route("/callback", methods=['GET'])
 def callback_get():
-    response = generate_text("Hello. Are you ready to help?")
-    return "callback ready for webhook: " + response
-
-
-import re
+    res = generate_text("Hello. Are you ready to help?")
+    return f"callback ready for webhook: {res}"
 
 
 def extract_datetime_components(s):
@@ -173,11 +170,19 @@ def handle_message(event):
             reply_message(event.reply_token,
                           f"Scheduled a reminder at {date_text} on {time_text}")
         else:
+            show_loading(event.source.user_id, 5)
             reply_message(reply_token=event.reply_token,
                           text=generate_text(event.message.text))
     else:
         reply_message(reply_token=event.reply_token,
                       text="ขออภัย ฉันเข้าใจแค่ข้อความ")
+
+
+def show_loading(chat_id, loading_seconds=5):
+    with ApiClient(configuration) as api_client:
+        line_bot_api = MessagingApi(api_client)
+        line_bot_api.show_loading_animation(ShowLoadingAnimationRequest(chatId=chat_id,
+                                                                        loadingSeconds=loading_seconds))
 
 
 def reply_message(reply_token, text):
@@ -186,7 +191,7 @@ def reply_message(reply_token, text):
         line_bot_api = MessagingApi(api_client)
         line_bot_api.reply_message_with_http_info(
             ReplyMessageRequest(
-                reply_token=reply_token,
+                replyToken=reply_token,
                 messages=[TextMessage(text=text)]
             )
         )
@@ -197,63 +202,19 @@ def log_request():
     print("Incoming request:", request.method, request.path)
 
 
-memory = "Nothing."
-recognizer = sr.Recognizer()
-stop_listening = None
-
-app = Flask(__name__)
-socketio = SocketIO(app)
-
-system_prompt = ""
-with open("text/system_prompt.txt", "r", encoding="utf8") as f:
-    for line in f:
-        system_prompt += line
-# print(system_prompt)
-
-context = ""
-with open("text/context.txt", "r", encoding="utf8") as f:
-    for line in f:
-        context += line
-
-
-# print(context)
-
-# question = ""
-# with open("text/question.txt", "r", encoding="utf8") as f:
-#    for line in f:
-#        question += line
-# print(question)
-
-
 @bp.route('/')
 def chatbot():
     return render_template('chatbot.html')
 
 
-@socketio.on('test_connection', namespace="/llm")
-def handle_connectx():
+@socketio.on('test_connection', namespace=SOCKET_NAMESPACE)
+def handle_connect_test():
     print("test_connection")
 
 
-@socketio.on('connect', namespace="/llm")
+@socketio.on('connect', namespace=SOCKET_NAMESPACE)
 def handle_connect():
     print("Client connected")
-
-
-def process_prompt(prompt, model):
-    result = gemini_client.models.generate_content_stream(
-        model="gemini-2.0-flash", contents=prompt, config=GenerateContentConfig(frequency_penalty=1.2))
-    final_text = ""
-    for r in result:
-        r = r.text
-        print(r, end=" ")
-        final_text += r
-        socketio.emit('new_word', r, namespace="/llm")
-        socketio.sleep(0)  # force the server to flush the socketio. DO NOT REMOVE
-    print()
-    # Assuming the result is a list of dictionaries
-    print(final_text)
-    return jsonify({"response": final_text}), 200
 
 
 @bp.route('/summarize', methods=['POST'])
@@ -272,8 +233,7 @@ def summarize_text():
 
 
 @bp.route('/generate', methods=['POST'])
-def generate_text():
-    model = "GEMINI"
+def generate_text_api():
     data = request.json
     if not data or 'prompt' not in data:
         return jsonify({"error": "Invalid input, 'prompt' is required"}), 400
@@ -287,7 +247,7 @@ def generate_text():
         "user_prompt": data['prompt']
     }
     prompt = json.dumps(prompt, ensure_ascii=False)
-    return process_prompt(prompt, model)
+    return process_prompt(prompt)
 
 
 @bp.route('/transcribe')
@@ -302,24 +262,24 @@ def background_recognition():
     with mic as source:
         recognizer.adjust_for_ambient_noise(source)
 
-    def callback(recognizer, audio):
+    def callback(_recognizer, audio):
         try:
-            text = recognizer.recognize_google(audio)
-            socketio.emit('transcription', {'text': text})
+            text = _recognizer.recognize_google(audio)
+            socketio.emit('transcription', {'text': text}, namespace=SOCKET_NAMESPACE)
         except sr.UnknownValueError:
-            socketio.emit('transcription', {'text': '[Unintelligible]'})
+            socketio.emit('transcription', {'text': '[Unintelligible]'}, namespace=SOCKET_NAMESPACE)
 
     with mic as source:
         stop_listening = recognizer.listen_in_background(source, callback)
 
 
-@socketio.on('start_transcribing', namespace="/llm")
+@socketio.on('start_transcribing', namespace=SOCKET_NAMESPACE)
 def start_transcribing():
     global stop_listening
     threading.Thread(target=background_recognition).start()
 
 
-@socketio.on('stop_transcribing', namespace="/llm")
+@socketio.on('stop_transcribing', namespace=SOCKET_NAMESPACE)
 def stop_transcribing():
     global stop_listening
     if stop_listening:
@@ -338,4 +298,4 @@ app.config['APPLICATION_ROOT'] = ''
 app.config['SECRET_KEY'] = 'secret!'
 
 if __name__ == "__main__":
-    app.run(debug=True, port=8084)
+    app.run(debug=True, port=9004)
