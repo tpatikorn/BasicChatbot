@@ -1,0 +1,8 @@
+class ReminderState:
+    IDLE = 1000
+    TITLE = 1001
+    DATETIME = 1002
+    DETAIL = 1003
+    EDIT_TITLE = 2001
+    EDIT_DATETIME = 2002
+    EDIT_DETAIL = 2003

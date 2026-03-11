@@ -1,6 +1,6 @@
 flask~=3.1.2
 python-dotenv~=1.2.1
-google-genai~=1.52.0
-line-bot-sdk~=3.21.0
-APScheduler~=3.11.1
-flask-socketio~=5.5.1
+google-genai~=1.60.0
+line-bot-sdk~=3.22.0
+APScheduler~=3.11.2
+flask-socketio~=5.6.0
