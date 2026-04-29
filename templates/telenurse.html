@@ -1,0 +1,206 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>จัดการการนัดหมาย Telenursing</title>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Sarabun:wght@300;400;600&display=swap');
+
+        body {
+            font-family: 'Sarabun', sans-serif;
+            background-color: #f0f2f5;
+            color: #333;
+            margin: 0;
+            padding: 20px;
+            display: flex;
+            justify-content: center;
+        }
+
+        .container {
+            background-color: #ffffff;
+            max-width: 800px;
+            width: 100%;
+            padding: 30px;
+            border-radius: 12px;
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.08);
+        }
+
+        h1 { color: #1a365d; text-align: center; margin-bottom: 30px; font-size: 24px; }
+        h2 { font-size: 18px; color: #2c5282; margin-top: 40px; border-bottom: 1px solid #e2e8f0; padding-bottom: 8px; }
+
+        /* Form Styling */
+        form {
+            display: grid;
+            gap: 15px;
+            background: #f8fafc;
+            padding: 20px;
+            border-radius: 10px;
+            border: 1px solid #e2e8f0;
+            margin-bottom: 30px;
+        }
+
+        label { font-weight: 600; font-size: 14px; color: #4a5568; }
+        input, select {
+            width: 100%; padding: 10px; border: 1px solid #cbd5e0; border-radius: 6px; font-family: 'Sarabun';
+        }
+
+        input[type="submit"] {
+            background-color: #2b6cb0; color: white; border: none; padding: 12px;
+            border-radius: 6px; font-weight: 600; cursor: pointer; transition: 0.3s;
+        }
+
+        input[type="submit"]:hover { background-color: #1a365d; }
+
+        /* Meeting Card Styling */
+        .meeting-card {
+            border: 1px solid #e2e8f0;
+            border-radius: 10px;
+            padding: 20px;
+            margin-bottom: 15px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.04);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            transition: transform 0.2s;
+        }
+
+        .meeting-card:hover { transform: scale(1.01); }
+
+        .card-content { display: flex; flex-direction: column; gap: 5px; }
+
+        .display-date {
+            font-size: 18px;
+            font-weight: 700;
+            color: #1a365d;
+        }
+
+        .display-details {
+            font-size: 16px;
+            color: #4a5568;
+        }
+
+        /* Status Colors */
+        .status-upcoming-soon { background-color: #e2f9e1 !important; border-color: #b7ebb3; } /* Light Green */
+        .status-canceled { background-color: #ffe5e5 !important; border-color: #fabebf; } /* Light Red */
+        .status-normal { background-color: #ffffff; }
+
+        .btn-cancel {
+            background-color: #fff; color: #c53030; border: 1px solid #feb2b2;
+            padding: 8px 15px; border-radius: 6px; cursor: pointer; font-weight: 600;
+        }
+
+        .btn-cancel:hover { background-color: #c53030; color: white; }
+
+        .text-muted { color: #a0aec0; font-size: 14px; text-align: center; margin: 20px 0; }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <h1>📅 ระบบจัดการ Telenursing</h1>
+
+    {% if message %}
+        <div style="background:#ebf8ff; color:#2c5282; padding:15px; border-radius:8px; margin-bottom:20px;">
+            ✨ {{ message }}
+        </div>
+    {% endif %}
+
+    <!-- Form Section -->
+    <form action="/llm/add_telenursing" method="post">
+        <select name="user_id" required>
+            <option selected disabled value="">เลือกบัญชีผู้ใช้...</option>
+            {% for user in users %}
+                <option value="{{ user['user_id'] }}">{{ user['display_name'] }}</option>
+            {% endfor %}
+        </select>
+        <input type="text" name="description" placeholder="คำอธิบายการนัดหมาย" required>
+        <input type="url" name="meeting_url" placeholder="Meeting URL (Zoom/Google Meet)" required>
+        <input type="datetime-local" name="meeting_dt" required>
+        <input type="submit" value="เพิ่มนัดหมายใหม่">
+    </form>
+
+    <!-- List Sections -->
+    <div id="meeting-lists">
+        <h2>🔔 การนัดหมายที่กำลังจะมาถึง</h2>
+        {% for meeting in telenursing|selectattr('enabled')|rejectattr('passed') %}
+            <div class="meeting-card status-normal upcoming-item" data-date="{{ meeting.meeting_dt }}">
+                <div class="card-content">
+                    <div class="display-date" data-iso="{{ meeting.meeting_dt }}"></div>
+                    <div class="display-details">Meeting with <strong>{{ meeting.display_name }}</strong> - {{ meeting.description }}</div>
+                </div>
+                <button class="btn-cancel" onclick="cancel_telenursing({{ meeting.id }})">ยกเลิก</button>
+            </div>
+        {% else %}
+            <p class="text-muted">ไม่มีการนัดหมายใหม่</p>
+        {% endfor %}
+
+        <h2>✅ การนัดหมายที่เสร็จสิ้นแล้ว</h2>
+        {% for meeting in telenursing|selectattr('enabled')|selectattr('passed') %}
+            <div class="meeting-card" style="opacity: 0.7; background: #f8fafc;">
+                <div class="card-content">
+                    <div class="display-date" data-iso="{{ meeting.meeting_dt }}"></div>
+                    <div class="display-details">Meeting with {{ meeting.display_name }} - {{ meeting.description }}</div>
+                </div>
+            </div>
+        {% endfor %}
+
+        <h2>❌ การนัดหมายที่ถูกยกเลิก</h2>
+        {% for meeting in telenursing|rejectattr('enabled') %}
+            <div class="meeting-card status-canceled">
+                <div class="card-content">
+                    <div class="display-date" data-iso="{{ meeting.meeting_dt }}" style="text-decoration: line-through; color: #a0aec0;"></div>
+                    <div class="display-details" style="color: #a0aec0;">Meeting with {{ meeting.display_name }} - {{ meeting.description }}</div>
+                </div>
+            </div>
+        {% endfor %}
+    </div>
+</div>
+
+<script>
+    // 1. Function แปลง ISO Date เป็นรูปแบบไทยที่อ่านง่าย
+    function formatThaiDate(isoString) {
+        const date = new Date(isoString);
+        return date.toLocaleDateString('th-TH', {
+            day: 'numeric',
+            month: 'short',
+            year: 'numeric',
+            hour: '2-digit',
+            minute: '2-digit'
+        }) + " น.";
+    }
+
+    // 2. ตรวจสอบเงื่อนไข 7 วัน และจัดรูปแบบวันที่เมื่อโหลดหน้า
+    document.addEventListener("DOMContentLoaded", function() {
+        const now = new Date();
+        const sevenDaysLater = new Date();
+        sevenDaysLater.setDate(now.getDate() + 7);
+
+        // จัดการเรื่องการแสดงผลวันที่ทั้งหมด
+        document.querySelectorAll('[data-iso]').forEach(el => {
+            el.innerText = formatThaiDate(el.getAttribute('data-iso'));
+        });
+
+        // ตรวจสอบเงื่อนไขสีเขียว (เฉพาะในส่วน upcoming)
+        document.querySelectorAll('.upcoming-item').forEach(card => {
+            const meetingDate = new Date(card.getAttribute('data-date'));
+            if (meetingDate <= sevenDaysLater && meetingDate >= now) {
+                card.classList.remove('status-normal');
+                card.classList.add('status-upcoming-soon');
+            }
+        });
+    });
+
+    function cancel_telenursing(telenursing_id) {
+        if(confirm("ยืนยันการยกเลิกนัดหมาย?")) {
+            fetch("/llm/cancel_telenursing", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ telenursing_id: telenursing_id })
+            }).then(() => window.location.reload());
+        }
+    }
+</script>
+
+</body>
+</html>

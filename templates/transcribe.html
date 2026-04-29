@@ -126,7 +126,7 @@
         wordContainer.textContent = "";
 
         try {
-            const response = await fetch('llm/summarize', {
+            const response = await fetch('llm/generate', {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
                 body: JSON.stringify({prompt})

@@ -39,7 +39,6 @@
 </head>
 <body>
 <h1>Chatbot</h1>
-<label for="passcode">passcode</label><input id="passcode"><br><br>
 <label for="prompt">prompt</label><textarea id="prompt" rows="5" cols="60">
 คนไข้มะเร็งควรกินอะไรบ้างระหว่างทำคีโม</textarea><br><br>
 <button id="submit">Submit</button>
@@ -72,7 +71,6 @@
 
     document.getElementById('submit').addEventListener('click', async () => {
         const prompt = document.getElementById('prompt').value;
-        const passcode = document.getElementById('passcode').value;
         const responseDiv = document.getElementById('response');
         const wordContainer = document.getElementById('word-container');
         responseDiv.textContent = "Generating...";
@@ -82,12 +80,12 @@
             const response = await fetch('generate', {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({"prompt": prompt, "passcode": passcode})
+                body: JSON.stringify({"prompt": prompt})
             });
 
-            const data = await response.json();
+            const data = await response.text();
             if (response.ok) {
-                responseDiv.textContent = data.response;
+                responseDiv.textContent = data;
             } else {
                 responseDiv.textContent = `Error: ${data.error}`;
             }

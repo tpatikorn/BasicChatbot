@@ -1,33 +1,25 @@
 # -*- coding: utf-8 -*-
 import json
 import os
-import re
-import threading
-from datetime import datetime, timedelta
+from datetime import datetime
 
 import dotenv
-import pythainlp.util.date
 import speech_recognition as sr
 from apscheduler.schedulers.background import BackgroundScheduler
-from flask import Flask, request, abort, Blueprint, jsonify, render_template
+from flask import Flask, request, abort, Blueprint, jsonify, render_template, session, redirect, url_for
 from flask_socketio import SocketIO
 from google import genai
 from google.genai.errors import ClientError
 from linebot.v3 import WebhookHandler
 from linebot.v3.exceptions import InvalidSignatureError
-from linebot.v3.messaging import (
-    Configuration,
-    ApiClient,
-    MessagingApi,
-    ReplyMessageRequest,
-    PushMessageRequest,
-    TextMessage, ShowLoadingAnimationRequest, TemplateMessage, ButtonsTemplate, DatetimePickerAction
-)
 from linebot.v3.webhooks import MessageEvent, TextMessageContent, PostbackEvent
-from pydantic import StrictStr
 
 from constants import ReminderState
-from database_manager import SingleConnection
+from manager.database_manager import log_chat
+from manager.helper_line import reply_message, show_loading, fetch_line_profile, fetch_all_users, push_message
+from manager.reminder_manager import create_reminder, set_session, get_session, check_for_notification, insert_reminder
+from manager.telenursing_manager import fetch_all_telenursing, insert_telenursing, cancel_telenursing
+from manager.util import str_to_date, formatted_thai_date
 
 # need to do this so that the code can be run from any current working directory
 # otherwise the CLI may use current working directory instead of using
@@ -38,18 +30,18 @@ bp = Blueprint('llm', __name__, template_folder='templates', static_folder='stat
 env = dotenv.load_dotenv()
 
 gemini_client = genai.Client(api_key=os.getenv('GEMINI_API_KEY'))
-configuration = Configuration(access_token=os.getenv("LINE_BOT_ACCESS_TOKEN"))
 handler = WebhookHandler(os.getenv("LINE_BOT_CHANNEL_SECRET"))
 
 app = Flask(__name__)
 scheduler = BackgroundScheduler()
 
-MODEL_LIST = ['gemini-flash-latest',
-              'gemini-3-flash-preview',
-              'gemini-flash-lite-latest',
-              'gemini-3.1-flash-lite-preview',
-              'gemini-2.5-flash',
-              'gemini-2.5-flash-lite']
+MODEL_LIST = [
+    'gemini-3.1-flash-lite-preview',
+    'gemini-flash-latest',
+    'gemini-3-flash-preview',
+    'gemini-flash-lite-latest',
+    'gemini-2.5-flash',
+    'gemini-2.5-flash-lite']
 CURRENT_MODEL_INDEX = 0
 
 memory = "Nothing."
@@ -69,27 +61,6 @@ context = ""
 with open(os.path.join(script_dir, "text/context.txt"), "r", encoding="utf8") as f:
     for line in f:
         context += line
-
-
-def test_shit(prompt):
-    for _model in MODEL_LIST:
-        print("\ntesting", _model)
-        try:
-            result = gemini_client.models.generate_content_stream(
-                model=_model, contents=prompt)  # xxx here
-
-            final_text = ""
-            for r in result:
-                r = r.text
-                # print(r, end=" ")
-                final_text += r
-                socketio.emit('new_word', r, namespace=SOCKET_NAMESPACE)
-                socketio.sleep(0)  # force the server to flush the socketio. DO NOT REMOVE
-                # print()
-                # Assuming the result is a list of dictionaries
-            print("model=", _model, final_text)
-        except ClientError as e:
-            print(e.code, e.message)
 
 
 def process_prompt(prompt):
@@ -131,26 +102,6 @@ def callback_get():
     return f"callback ready for webhook: {res}"
 
 
-def extract_datetime_components(s):
-    # Match pattern: yyyy-MM-dd hh-mm
-    pattern = r'(\d{4})-(\d{2})-(\d{2}) (\d{2}):(\d{2})'
-    match = re.search(pattern, s)
-
-    if match:
-        year, month, day, hour, minute = match.groups()
-        return int(year), int(month), int(day), int(hour), int(minute)
-    else:
-        raise ValueError("No valid datetime substring found in the input.")
-
-
-def schedule_notification(user_id, date_text, time_text, message):
-    with SingleConnection() as con:
-        con.execute("INSERT INTO notifications (user_id, date, time, message) "
-                    "VALUES (?, ?, ?, ?)",
-                    (str(user_id), date_text, time_text, message))
-        con.commit()
-
-
 @bp.route("/callback", methods=['POST'])
 def callback_post():
     # get X-Line-Signature header value
@@ -169,44 +120,30 @@ def callback_post():
     return 'OK'
 
 
-def push_message(user_id, message):
-    with ApiClient(configuration) as api_client:
-        line_bot_api = MessagingApi(api_client)
-        line_bot_api.push_message_with_http_info(
-            PushMessageRequest(to=user_id,
-                               messages=[TextMessage(text=message)])
-        )
-
-
-def check_for_notification():
-    with SingleConnection() as con:
-        now = datetime.now()
-        date = now.strftime("%Y-%m-%d")
-        ytd = (now - timedelta(days=1)).strftime("%Y-%m-%d")
-        notifications = con.execute("SELECT * FROM notifications WHERE sent = 0 and (date == ? or date == ?)",
-                                    (date, ytd)).fetchall()
-        sent_count = 0
-        for n in notifications:
-            n = dict(n)  # to prevent sqlite3 different thread problem
-            scheduled_dt = datetime.strptime(f"{n['date']} {n['time']}", "%Y-%m-%d %H:%M")
-            if scheduled_dt < now:
-                push_message(user_id=n['user_id'], message=f"อย่าลืม: {n['message']}")
-                sent_count += 1
-
-        if sent_count > 0:
-            print(
-                f"checking for notifications to be sent... now {now}: {sent_count} messages sent.")
-
-
 @handler.add(MessageEvent, message=TextMessageContent)
 def handle_message(event):
     if event.message.type == "text":
+        user = fetch_line_profile(event.source.user_id)
         event_text = event.message.text
-        if event_text == "สวัสดี คุณช่วยอะไรฉันได้บ้าง":
-            response_message = "สวัสดีค่ะ/ครับ หนูเป็นผู้ช่วยพยาบาลผู้เชี่ยวชาญด้านการดูแลผู้ป่วยมะเร็งเด็กนะคะ ยินดีให้คำแนะนำและข้อมูลเกี่ยวกับการดูแลเด็กป่วยมะเร็งเม็ดเลือดขาวค่ะ มีเรื่องอะไรอยากปรึกษาได้เลยนะคะ"
+        if (user['admin'] == 1) and event_text == os.getenv("PASSCODE"):
+            response_message = ("เพื่อเข้าสู่ admin menu\n"
+                                "1. ไปยัง https://tpatikorn.com/llm/ เพื่อใส่ PASSOCDE หากใส่ไม่ถูกต้องจะใช้เมนูอื่นไม่ได้\n"
+                                "2. ไปยัง https://tpatikorn.com/llm/chatbot เพื่อใช้ chatbot ผ่านทางหน้าเว็ป\n"
+                                "3. ไปยัง https://tpatikorn.com/llm/telenursing เพื่อจัดการ telenursing")
             log_chat(event.source.user_id, message=event.message.text, response=response_message,
                      model_name="default response")
-            reply_message(reply_token=event.reply_token, text=response_message)
+            reply_message(reply_token=event.reply_token, content=response_message)
+        elif str_to_date(user['end_date']) < datetime.today().date():
+            response_message = "ขอบคุณมาก ๆ เลยนะคะที่ร่วมเป็นส่วนหนึ่งในการทดลองใช้ Smart Can Care กับเรา เนื่องจากตอนนี้ระบบยังอยู่ในช่วงพัฒนาเพื่อให้มั่นใจในความปลอดภัยต่อการรักษาจริง ทางเราจึงต้องขออนุญาตสิ้นสุดช่วงทดลองสำหรับคุณในรอบนี้ก่อน ต้องขออภัยในความไม่สะดวก และขอบคุณจากใจจริงที่สละเวลามาช่วยเราพัฒนานะคะ 🙏"
+            log_chat(event.source.user_id, message=event.message.text, response=response_message,
+                     model_name="default response")
+            reply_message(reply_token=event.reply_token, content=response_message)
+        elif event_text == "สวัสดี คุณช่วยอะไรฉันได้บ้าง":
+            end_date_th = formatted_thai_date(str_to_date(user['end_date']))
+            response_message = f"สวัสดีค่ะ/ครับ หนูเป็นผู้ช่วยพยาบาลผู้เชี่ยวชาญด้านการดูแลผู้ป่วยมะเร็งเด็กนะคะ ยินดีให้คำแนะนำและข้อมูลเกี่ยวกับการดูแลเด็กป่วยมะเร็งเม็ดเลือดขาวค่ะ มีเรื่องอะไรอยากปรึกษาได้เลยนะคะ\n\nขณะนี้ ระบบยังอยู่ในช่วงทดลองนะคะ คุณจะทดลองระบบได้ถึง{end_date_th}"
+            log_chat(event.source.user_id, message=event.message.text, response=response_message,
+                     model_name="default response")
+            reply_message(reply_token=event.reply_token, content=response_message)
         elif event_text.startswith("reminder"):
             create_reminder(event.source.user_id, event.reply_token)
         elif event_text.startswith("cancel"):
@@ -217,15 +154,15 @@ def handle_message(event):
                             action="continue",
                             text=event_text)
         else:
-            show_loading(event.source.user_id, 10)
+            show_loading(event.source.user_id, 30)
             response_message = generate_text(event.message.text)
             log_chat(event.source.user_id, message=event.message.text, response=response_message,
                      model_name=MODEL_LIST[CURRENT_MODEL_INDEX])
-            reply_message(reply_token=event.reply_token, text=response_message)
+            reply_message(reply_token=event.reply_token, content=response_message)
     else:
         print("cannot understand:", event.message.type, event.message)
         reply_message(reply_token=event.reply_token,
-                      text="ขออภัย ฉันเข้าใจแค่ข้อความ")
+                      content="ขออภัย ฉันเข้าใจแค่ข้อความ")
 
 
 @handler.add(PostbackEvent)
@@ -238,52 +175,7 @@ def handle_postback_message(event):
     else:
         print(event.message.type, event.message)
         reply_message(reply_token=event.reply_token,
-                      text="ขออภัย ฉันเข้าใจแค่ข้อความ")
-
-
-def show_loading(chat_id, loading_seconds=5):
-    with ApiClient(configuration) as api_client:
-        line_bot_api = MessagingApi(api_client)
-        line_bot_api.show_loading_animation(ShowLoadingAnimationRequest(chatId=chat_id,
-                                                                        loadingSeconds=loading_seconds))
-
-
-def reply_message(reply_token, text):
-    print("replying:", text)
-    with ApiClient(configuration) as api_client:
-        line_bot_api = MessagingApi(api_client)
-        line_bot_api.reply_message_with_http_info(
-            ReplyMessageRequest(
-                replyToken=reply_token,
-                messages=[TextMessage(text=text)]
-            )
-        )
-
-
-def datetime_message(reply_token, text):
-    print("datetime:", text)
-    with ApiClient(configuration) as api_client:
-        date_picker = TemplateMessage(
-            altText=text,
-            template=ButtonsTemplate(
-                text=text,
-                actions=[
-                    DatetimePickerAction(
-                        label=StrictStr("วันที่และเวลานัดหมาย"),
-                        data="action=set_datetime",  # Identify this specific picker
-                        mode=StrictStr("datetime")
-                    )
-                ]
-            )
-        )
-
-        line_bot_api = MessagingApi(api_client)
-        line_bot_api.reply_message_with_http_info(
-            ReplyMessageRequest(
-                replyToken=reply_token,
-                messages=[date_picker]
-            )
-        )
+                      content="ขออภัย ฉันเข้าใจแค่ข้อความ")
 
 
 @app.before_request
@@ -292,8 +184,76 @@ def log_request():
 
 
 @bp.route('/')
+def home():
+    return render_template('home.html')
+
+
+@bp.route('chatbot')
 def chatbot():
+    if session.get('passcode') != os.getenv("PASSCODE"):
+        return render_template('home.html',
+                               message="passcode incorrect. Please input the correct passcode to use the admin tool.")
     return render_template('chatbot.html')
+
+
+@bp.route('privacy')
+def privacy():
+    return render_template('privacy.html')
+
+
+@bp.route('telenursing')
+def telenursing(message=None):
+    if session.get('passcode') != os.getenv("PASSCODE"):
+        return render_template('home.html',
+                               message="passcode incorrect. Please input the correct passcode to use the admin tool.")
+    users = fetch_all_users()
+    telenursing_meetings = fetch_all_telenursing()
+
+    return render_template('telenurse.html', users=users, telenursing=telenursing_meetings, message=message)
+
+
+@bp.route('add_telenursing', methods=['POST'])
+def add_telenursing():
+    if session.get('passcode') != os.getenv("PASSCODE"):
+        return render_template('home.html',
+                               message="passcode incorrect. Please input the correct passcode to use the admin tool.")
+    user_id = request.form.get('user_id')
+    meeting_dt = datetime.fromisoformat(request.form.get('meeting_dt'))
+    meeting_url = request.form.get('meeting_url')
+    description = request.form.get('description')
+    try:
+        result_id = insert_telenursing(user_id=user_id, meeting_dt=meeting_dt, meeting_url=meeting_url,
+                                       description=description)
+        reply_text = insert_reminder(user_id=user_id, target_dt=meeting_dt, title=f"telenursing {meeting_dt}",
+                                     detail=f'{description}\n\nเข้าสู่ telenursing ได้ที่ {meeting_url}')
+        log_chat(user_id, message="scheduling from web UI", response=reply_text, model_name="automated message")
+        push_message(user_id=user_id, message=reply_text)
+        if result_id > 0:
+            return redirect(url_for("llm.telenursing", message="success"))
+    except Exception as ex:
+        return redirect(url_for("llm.telenursing", message=str(ex)))
+    return redirect(url_for("llm.telenursing", message="Unknown error has occurred."))
+
+
+@bp.route('cancel_telenursing', methods=['POST'])
+def cancel_telenursing_endpoint():
+    if session.get('passcode') != os.getenv("PASSCODE"):
+        return render_template('home.html',
+                               message="passcode incorrect. Please input the correct passcode to use the admin tool.")
+    telenursing_id = request.json.get('telenursing_id')
+    try:
+        # print(telenursing_id)
+        cancel_telenursing(telenursing_id)
+        telenursing(message="success")
+    except Exception as ex:
+        return telenursing(message=str(ex))
+    return telenursing(message="Unknown error has occurred.")
+
+
+@bp.route('passcode', methods=["POST"])
+def passcode():
+    session['passcode'] = request.form.get('passcode')
+    return render_template('home.html', message="passcode set!")
 
 
 @socketio.on('test_connection', namespace=SOCKET_NAMESPACE)
@@ -306,29 +266,11 @@ def handle_connect():
     print("Client connected")
 
 
-@bp.route('/summarize', methods=['POST'])
-def summarize_text():
-    data = request.json
-    if not data or 'prompt' not in data:
-        return jsonify({"error": "Invalid input, 'prompt' is required"}), 400
-
-    prompt = {
-        "system_prompt": system_prompt,
-        "context": context,
-        "user_prompt": data['prompt']
-    }
-    prompt = json.dumps(prompt, ensure_ascii=False)
-    return process_prompt(prompt)
-
-
 @bp.route('/generate', methods=['POST'])
 def generate_text_api():
     data = request.json
     if not data or 'prompt' not in data:
         return jsonify({"error": "Invalid input, 'prompt' is required"}), 400
-    if 'passcode' not in data or data['passcode'] != "Aj.Nune<3":
-        print(data['passcode'])
-        return jsonify({"error": "Invalid passcode"}), 400
 
     prompt = {
         "system_prompt": system_prompt,
@@ -337,142 +279,6 @@ def generate_text_api():
     }
     prompt = json.dumps(prompt, ensure_ascii=False)
     return process_prompt(prompt)
-
-
-@bp.route('/transcribe')
-def transcribe():
-    return render_template('transcribe.html')
-
-
-def background_recognition():
-    global stop_listening
-    mic = sr.Microphone()
-
-    with mic as source:
-        recognizer.adjust_for_ambient_noise(source)
-
-    def callback(_recognizer, audio):
-        try:
-            text = _recognizer.recognize_google(audio)
-            socketio.emit('transcription', {'text': text}, namespace=SOCKET_NAMESPACE)
-        except sr.UnknownValueError:
-            socketio.emit('transcription', {'text': '[Unintelligible]'}, namespace=SOCKET_NAMESPACE)
-
-    with mic as source:
-        stop_listening = recognizer.listen_in_background(source, callback)
-
-
-@socketio.on('start_transcribing', namespace=SOCKET_NAMESPACE)
-def start_transcribing():
-    global stop_listening
-    threading.Thread(target=background_recognition).start()
-
-
-@socketio.on('stop_transcribing', namespace=SOCKET_NAMESPACE)
-def stop_transcribing():
-    global stop_listening
-    if stop_listening:
-        stop_listening()
-
-
-# ----------------- for a legit reminder logic ---------------
-# Simple in-memory storage (Use Redis/Database for production)
-# Format: { 'user_id': {'state': '...', 'data': {'title': '...', 'datetime': '...', 'detail': '...'}} }
-def formatted_thai_dt(dt):
-    return pythainlp.util.thai_strftime(dt_obj=dt, fmt="%Aที่ %d %B %Y เวลา %H:%M น.")
-
-
-user_sessions = {}
-
-
-def get_session(user_id):
-    if user_id not in user_sessions:
-        user_sessions[user_id] = {'state': ReminderState.IDLE, 'data': {}}
-    return user_sessions[user_id]
-
-
-def set_session(user_id, state, title=None, target_datetime=None, detail=None):
-    if user_id not in user_sessions:
-        user_sessions[user_id] = {'state': ReminderState.IDLE, 'data': {}}
-
-    user_sessions[user_id]['state'] = state
-    if title is not None:
-        user_sessions[user_id]['data']['title'] = title
-    if target_datetime is not None:
-        user_sessions[user_id]['data']['datetime'] = target_datetime
-    if detail is not None:
-        user_sessions[user_id]['data']['detail'] = detail
-    return user_sessions[user_id]
-
-
-def log_chat(user_id, message, response, model_name):
-    dt_now = datetime.now()
-    date_text = dt_now.strftime("%Y-%m-%d")
-    time_text = dt_now.strftime("%H:%M")
-
-    with SingleConnection() as con:
-        con.execute("INSERT INTO chat_logs (user_id, date, time, message, response, error, model) "
-                    "VALUES (?, ?, ?, ?, ?, ?, ?)",
-                    (str(user_id), date_text, time_text, message, response, '', model_name))
-        con.commit()
-
-
-def create_reminder(user_id, reply_token, action="new", text=None):
-    if action == "new":
-        set_session(user_id, ReminderState.TITLE)
-        reply_message(reply_token, "กรุณาใส่การชื่อการนัดหมายที่ต้องการเตือน")
-    elif action == "cancel":
-        set_session(user_id, ReminderState.IDLE)
-    else:
-        match get_session(user_id)['state']:
-            case ReminderState.TITLE:
-                set_session(user_id, ReminderState.DATETIME, title=text)
-                datetime_message(reply_token, "กรุณาเลือกวันที่และเวลาของการนัดหมาย")
-            case ReminderState.DATETIME:
-                target_dt = datetime.fromisoformat(text)
-                if target_dt < datetime.now() + timedelta(hours=1):
-                    datetime_message(reply_token,
-                                     "คุณเลือกเวลาที่ใกล้เกินไป (น้อยกว่า 1 ชั่วโมงจากนี้) กรุณาเลือกวันที่และเวลาของการนัดหมายใหม่")
-                else:
-                    set_session(user_id, ReminderState.DETAIL, target_datetime=text)
-                    reply_message(reply_token, f"คุณใส่เลือกวันเวลา {formatted_thai_dt(datetime.fromisoformat(text))}\n"
-                                               f"กรุณาใส่รายละเอียดอื่น ๆ เกี่ยวกับการนัดหมาย เช่น การเตรียมตัว")
-            case ReminderState.DETAIL:
-                set_session(user_id, ReminderState.IDLE, detail=text)
-                print(user_sessions[user_id]['data'])
-                print("DONE!")
-                reminder_info = user_sessions[user_id]['data']
-                target_dt = datetime.fromisoformat(reminder_info['datetime'])
-                morning_of = target_dt.replace(hour=6, minute=0, second=0, microsecond=0)
-                night_before = morning_of.replace(day=morning_of.day - 1, hour=18)
-                seven_days = morning_of.replace(day=morning_of.day - 7)
-                reminder_text = (f"การเตือนการนัดหมาย เรื่อง:\n {reminder_info['title']}\n\n"
-                                 f"นัดหมายวันเดือนปี เวลา:\n {formatted_thai_dt(target_dt)}\n\n"
-                                 f"รายละเอียดอื่น ๆ:\n {reminder_info['detail']}")
-
-                reply_text = (f"สร้างการเตือนการนัดหมายสำเร็จ\n\n"
-                              f"{reminder_text}\n\n"
-                              f"วันเวลาที่จะเตือน: \n")
-                if seven_days > datetime.now():
-                    reply_text += f"- {formatted_thai_dt(seven_days)} (7 วันก่อนวันนัด)\n"
-                if night_before > datetime.now():
-                    reply_text += f"- {formatted_thai_dt(night_before)} (คืนก่อนวันนัด)\n"
-                if morning_of > datetime.now():
-                    reply_text += f"- {formatted_thai_dt(morning_of)} (เช้าวันนัด)\n"
-                reply_text += f"- {formatted_thai_dt(target_dt)} (วันและเวลาที่นัด)"
-
-                for to_remind in [morning_of, night_before, seven_days, target_dt]:
-                    if to_remind > datetime.now():
-                        date_text = to_remind.strftime("%Y-%m-%d")
-                        time_text = to_remind.strftime("%H:%M")
-                        schedule_notification(user_id=user_id, date_text=date_text, time_text=time_text,
-                                              message=reminder_text)
-
-                reply_message(reply_token, text=reply_text)
-            case _:
-                pass
-
-    pass
 
 
 # -------------------------------------------------
