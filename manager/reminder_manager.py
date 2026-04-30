@@ -102,7 +102,7 @@ def check_for_notification():
         now = datetime.now()
         date = now.strftime("%Y-%m-%d")
         ytd = (now - timedelta(days=1)).strftime("%Y-%m-%d")
-        notifications = con.execute("SELECT * FROM notifications WHERE sent = 0 and (date == %s or date == %s)",
+        notifications = con.execute("SELECT * FROM notifications WHERE sent = 0 and (date = %s or date = %s)",
                                     (date, ytd)).fetchall()
         sent_count = 0
         for n in notifications:

@@ -16,7 +16,8 @@ from linebot.v3.webhooks import MessageEvent, TextMessageContent, PostbackEvent
 
 from constants import ReminderState
 from manager.database_manager import log_chat
-from manager.helper_line import reply_message, show_loading, fetch_line_profile, fetch_all_users, push_message
+from manager.helper_line import reply_message, show_loading, fetch_line_profile, fetch_all_users, push_message, \
+    upsert_line_profile
 from manager.reminder_manager import create_reminder, set_session, get_session, check_for_notification, insert_reminder
 from manager.telenursing_manager import fetch_all_telenursing, insert_telenursing, cancel_telenursing
 from manager.util import str_to_date, formatted_thai_date
@@ -120,30 +121,62 @@ def callback_post():
     return 'OK'
 
 
+def plain_text_reply_and_log(response_message, model_name, user_id, original_text, reply_token):
+    log_chat(user_id, message=original_text, response=response_message, model_name=model_name)
+    reply_message(reply_token=reply_token, content=response_message)
+
+
 @handler.add(MessageEvent, message=TextMessageContent)
 def handle_message(event):
     if event.message.type == "text":
         user = fetch_line_profile(event.source.user_id)
         event_text = event.message.text
-        if (user['admin'] == 1) and event_text == os.getenv("PASSCODE"):
-            response_message = ("เพื่อเข้าสู่ admin menu\n"
-                                "1. ไปยัง https://tpatikorn.com/llm/ เพื่อใส่ PASSOCDE หากใส่ไม่ถูกต้องจะใช้เมนูอื่นไม่ได้\n"
-                                "2. ไปยัง https://tpatikorn.com/llm/chatbot เพื่อใช้ chatbot ผ่านทางหน้าเว็ป\n"
-                                "3. ไปยัง https://tpatikorn.com/llm/telenursing เพื่อจัดการ telenursing")
-            log_chat(event.source.user_id, message=event.message.text, response=response_message,
-                     model_name="default response")
-            reply_message(reply_token=event.reply_token, content=response_message)
+        print("user---", user)
+        # new users
+        if user is None:
+            if (event_text == "ยอมรับ") or (event_text == "\"ยอมรับ\""):
+                user = upsert_line_profile(event.source.user_id)
+                end_date_th = formatted_thai_date(str_to_date(user['end_date']))
+                plain_text_reply_and_log(
+                    f"สวัสดีค่ะ/ครับ หนูเป็นผู้ช่วยพยาบาลผู้เชี่ยวชาญด้านการดูแลผู้ป่วยมะเร็งเด็กนะคะ "
+                    f"ยินดีให้คำแนะนำและข้อมูลเกี่ยวกับการดูแลเด็กป่วยมะเร็งเม็ดเลือดขาวค่ะ มีเรื่องอะไรอยากปรึกษาได้เลยนะคะ\n\n"
+                    f"ขณะนี้ ระบบยังอยู่ในช่วงทดลองนะคะ คุณจะทดลองระบบได้ถึง{end_date_th}",
+                    "default response",
+                    event.source.user_id, event.message.text, event.reply_token)
+            else:
+                plain_text_reply_and_log(
+                    "สวัสดีค่ะ ยินดีต้อนรับสู่ Smart Can Care ค่ะ\n\n"
+                    "เราคือผู้ช่วยพยาบาลที่จะอยู่เคียงข้างท่าน เพื่อให้ข้อมูลและคำแนะนำในการดูแลเด็กป่วยมะเร็งเม็ดเลือดขาวอย่างถูกวิธี "
+                    "เราให้ความสำคัญกับความเป็นส่วนตัวของท่านเป็นอันดับหนึ่ง จึงขอความร่วมมือให้ท่านอ่านนโยบายการจัดการข้อมูลส่วนบุคคลก่อนเริ่มต้นใช้งานค่ะ \n"
+                    f"https://tpatikorn.com/llm/privacy\n\n"
+                    "เมื่อท่านทำความเข้าใจและยินยอมรับเงื่อนไขแล้ว กรุณาพิมพ์คำว่า \n\"ยอมรับ\"\n เพื่อให้ระบบเริ่มทำงานและพร้อมพูดคุยกับท่านค่ะ",
+                    "default response",
+                    event.source.user_id, event.message.text, event.reply_token)
+
+        # existing users
+        elif (user['admin'] == 1) and event_text == os.getenv("PASSCODE"):
+            plain_text_reply_and_log(
+                "เพื่อเข้าสู่ admin menu\n"
+                "1. ไปยัง https://tpatikorn.com/llm/ เพื่อใส่ PASSOCDE หากใส่ไม่ถูกต้องจะใช้เมนูอื่นไม่ได้\n"
+                "2. ไปยัง https://tpatikorn.com/llm/chatbot เพื่อใช้ chatbot ผ่านทางหน้าเว็ป\n"
+                "3. ไปยัง https://tpatikorn.com/llm/telenursing เพื่อจัดการ telenursing",
+                "default response",
+                event.source.user_id, event.message.text, event.reply_token)
         elif str_to_date(user['end_date']) < datetime.today().date():
-            response_message = "ขอบคุณมาก ๆ เลยนะคะที่ร่วมเป็นส่วนหนึ่งในการทดลองใช้ Smart Can Care กับเรา เนื่องจากตอนนี้ระบบยังอยู่ในช่วงพัฒนาเพื่อให้มั่นใจในความปลอดภัยต่อการรักษาจริง ทางเราจึงต้องขออนุญาตสิ้นสุดช่วงทดลองสำหรับคุณในรอบนี้ก่อน ต้องขออภัยในความไม่สะดวก และขอบคุณจากใจจริงที่สละเวลามาช่วยเราพัฒนานะคะ 🙏"
-            log_chat(event.source.user_id, message=event.message.text, response=response_message,
-                     model_name="default response")
-            reply_message(reply_token=event.reply_token, content=response_message)
+            plain_text_reply_and_log(
+                "ขอบคุณมาก ๆ เลยนะคะที่ร่วมเป็นส่วนหนึ่งในการทดลองใช้ Smart Can Care กับเรา "
+                "เนื่องจากตอนนี้ระบบยังอยู่ในช่วงพัฒนาเพื่อให้มั่นใจในความปลอดภัยต่อการรักษาจริง ทางเราจึงต้องขออนุญาตสิ้นสุดช่วงทดลองสำหรับคุณในรอบนี้ก่อน "
+                "ต้องขออภัยในความไม่สะดวก และขอบคุณจากใจจริงที่สละเวลามาช่วยเราพัฒนานะคะ 🙏",
+                "default response",
+                event.source.user_id, event.message.text, event.reply_token)
         elif event_text == "สวัสดี คุณช่วยอะไรฉันได้บ้าง":
             end_date_th = formatted_thai_date(str_to_date(user['end_date']))
-            response_message = f"สวัสดีค่ะ/ครับ หนูเป็นผู้ช่วยพยาบาลผู้เชี่ยวชาญด้านการดูแลผู้ป่วยมะเร็งเด็กนะคะ ยินดีให้คำแนะนำและข้อมูลเกี่ยวกับการดูแลเด็กป่วยมะเร็งเม็ดเลือดขาวค่ะ มีเรื่องอะไรอยากปรึกษาได้เลยนะคะ\n\nขณะนี้ ระบบยังอยู่ในช่วงทดลองนะคะ คุณจะทดลองระบบได้ถึง{end_date_th}"
-            log_chat(event.source.user_id, message=event.message.text, response=response_message,
-                     model_name="default response")
-            reply_message(reply_token=event.reply_token, content=response_message)
+            plain_text_reply_and_log(
+                f"สวัสดีค่ะ/ครับ หนูเป็นผู้ช่วยพยาบาลผู้เชี่ยวชาญด้านการดูแลผู้ป่วยมะเร็งเด็กนะคะ "
+                f"ยินดีให้คำแนะนำและข้อมูลเกี่ยวกับการดูแลเด็กป่วยมะเร็งเม็ดเลือดขาวค่ะ มีเรื่องอะไรอยากปรึกษาได้เลยนะคะ\n\n"
+                f"ขณะนี้ ระบบยังอยู่ในช่วงทดลองนะคะ คุณจะทดลองระบบได้ถึง{end_date_th}",
+                "default response",
+                event.source.user_id, event.message.text, event.reply_token)
         elif event_text.startswith("reminder"):
             create_reminder(event.source.user_id, event.reply_token)
         elif event_text.startswith("cancel"):
@@ -155,10 +188,10 @@ def handle_message(event):
                             text=event_text)
         else:
             show_loading(event.source.user_id, 30)
-            response_message = generate_text(event.message.text)
-            log_chat(event.source.user_id, message=event.message.text, response=response_message,
-                     model_name=MODEL_LIST[CURRENT_MODEL_INDEX])
-            reply_message(reply_token=event.reply_token, content=response_message)
+            plain_text_reply_and_log(
+                generate_text(event.message.text),
+                MODEL_LIST[CURRENT_MODEL_INDEX],
+                event.source.user_id, event.message.text, event.reply_token)
     else:
         print("cannot understand:", event.message.type, event.message)
         reply_message(reply_token=event.reply_token,

@@ -24,6 +24,12 @@ def fetch_line_config():
 
 # take user_id and return user_id, display_name, picture_url, and status_message
 def fetch_line_profile(user_id):
+    with SingleConnection() as con:
+        user = con.execute("SELECT * FROM users WHERE user_id = %s", (user_id,)).fetchone()
+        return dict(user) if user else None
+
+# take user_id and return user_id, display_name, picture_url, and status_message
+def upsert_line_profile(user_id):
     with ApiClient(fetch_line_config()) as api_client:
         line_bot_api = MessagingApi(api_client)
         profile = line_bot_api.get_profile(user_id)
