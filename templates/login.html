@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>เข้าสู่ระบบ - Smart Can Care Admin</title>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Sarabun:wght@300;400;600&display=swap');
+
+        body {
+            font-family: 'Sarabun', sans-serif;
+            background-color: #f0f2f5;
+            color: #333;
+            margin: 0;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh; /* ให้การ์ดอยู่กลางจอพอดี */
+        }
+
+        .login-card {
+            background-color: #ffffff;
+            max-width: 400px;
+            width: 90%;
+            padding: 40px;
+            border-radius: 12px;
+            box-shadow: 0 10px 25px rgba(0, 0, 0, 0.1);
+            text-align: center;
+        }
+
+        .logo-area {
+            margin-bottom: 25px;
+        }
+
+        .logo-area h1 {
+            color: #1a365d;
+            font-size: 22px;
+            margin: 10px 0 5px 0;
+        }
+
+        .logo-area p {
+            color: #718096;
+            font-size: 14px;
+            margin: 0;
+        }
+
+        /* Message Box (สำหรับแสดงข้อความรหัสผิด) */
+        .alert {
+            background-color: #fff5f5;
+            color: #c53030;
+            padding: 12px;
+            border-radius: 6px;
+            margin-bottom: 20px;
+            font-size: 14px;
+            border: 1px solid #feb2b2;
+        }
+
+        form {
+            display: grid;
+            gap: 15px;
+            text-align: left;
+        }
+
+        label {
+            font-weight: 600;
+            font-size: 14px;
+            color: #4a5568;
+            margin-bottom: -10px; /* ขยับป้ายชื่อมาใกล้ช่องกรอก */
+        }
+
+        input {
+            width: 100%;
+            padding: 12px;
+            border: 1px solid #cbd5e0;
+            border-radius: 8px;
+            font-family: 'Sarabun', sans-serif;
+            font-size: 16px;
+            box-sizing: border-box;
+            transition: border-color 0.2s;
+        }
+
+        input:focus {
+            outline: none;
+            border-color: #3182ce;
+            box-shadow: 0 0 0 3px rgba(66, 153, 225, 0.1);
+        }
+
+        input[type="submit"] {
+            background-color: #2b6cb0;
+            color: white;
+            border: none;
+            font-weight: 600;
+            cursor: pointer;
+            margin-top: 10px;
+            transition: background 0.3s;
+        }
+
+        input[type="submit"]:hover {
+            background-color: #1a365d;
+        }
+
+        .footer-note {
+            margin-top: 25px;
+            font-size: 12px;
+            color: #a0aec0;
+        }
+    </style>
+</head>
+<body>
+
+<div class="login-card">
+    <div class="logo-area">
+        <div style="font-size: 40px;">🔐</div>
+        <h1>Admin Login</h1>
+        <p>Smart Can Care Research Project</p>
+    </div>
+
+    {% if message %}
+        <div class="alert">
+            ⚠️ {{ message }}
+        </div>
+    {% endif %}
+
+    <form action="/llm/login" method="POST">
+        <label for="username">ชื่อผู้ใช้งาน</label>
+        <input type="text" id="username" name="username" placeholder="Username" required autofocus>
+
+        <label for="password">รหัสผ่าน</label>
+        <input type="password" id="password" name="password" placeholder="Password" required>
+
+        <input type="submit" value="เข้าสู่ระบบ">
+    </form>
+
+    <div class="footer-note">
+        &copy; 2026 Smart Can Care Research Team<br>
+        ระบบจัดการเฉพาะผู้วิจัยที่ได้รับอนุญาตเท่านั้น
+    </div>
+</div>
+
+</body>
+</html>

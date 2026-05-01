@@ -9,3 +9,5 @@ protobuf~=7.34.1
 speechrecognition~=3.16.0
 pythainlp~=5.3.4
 psycopg>=3.3.3
+waitress>=3.0.2
+

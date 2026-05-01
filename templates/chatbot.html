@@ -1,80 +1,189 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="th">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.0/socket.io.min.js"></script>
-    <title>Chatbot</title>
+    <title>ทดสอบ Chatbot - Smart Can Care</title>
     <style>
+        @import url('https://fonts.googleapis.com/css2?family=Sarabun:wght@300;400;600&display=swap');
+
         body {
-            font-family: Arial, sans-serif;
-            margin: 30px;
+            font-family: 'Sarabun', sans-serif;
+            background-color: #f0f2f5;
+            color: #333;
+            margin: 0;
+            padding: 20px;
+            display: flex;
+            justify-content: center;
+        }
+
+        .container {
+            background-color: #ffffff;
+            max-width: 1000px;
+            width: 100%;
+            padding: 30px;
+            border-radius: 15px;
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.08);
+        }
+
+        .header-area {
+            text-align: center;
+            margin-bottom: 30px;
+        }
+
+        h1 {
+            color: #1a365d;
+            margin-bottom: 10px;
+            font-size: 26px;
+        }
+
+        h2 {
+            font-size: 18px;
+            color: #2c5282;
+            margin-top: 0;
+            margin-bottom: 15px;
+            border-bottom: 1px solid #e2e8f0;
+            padding-bottom: 8px;
+        }
+
+        /* Input Section */
+        .input-section {
+            background: #f8fafc;
+            padding: 20px;
+            border-radius: 12px;
+            border: 1px solid #e2e8f0;
+            margin-bottom: 30px;
+        }
+
+        label {
+            font-weight: 600;
+            font-size: 15px;
+            color: #4a5568;
+            display: block;
+            margin-bottom: 10px;
         }
 
         textarea {
-            font-size: 24px;
+            width: 100%;
+            padding: 15px;
+            border: 1px solid #cbd5e0;
             border-radius: 10px;
+            font-family: 'Sarabun', sans-serif;
+            font-size: 16px;
+            box-sizing: border-box;
+            resize: vertical;
+            min-height: 120px;
+            transition: border-color 0.2s;
         }
 
-        .outerbox {
-            margin: 5px;
-            padding: 5px;
-            width: 45%;
+        textarea:focus {
+            outline: none;
+            border-color: #3182ce;
+            box-shadow: 0 0 0 3px rgba(66, 153, 225, 0.1);
+        }
+
+        button#submit {
+            background-color: #2b6cb0;
+            color: white;
+            border: none;
+            padding: 12px 30px;
+            border-radius: 8px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: background 0.3s;
+            margin-top: 15px;
+            width: 100%;
+        }
+
+        button#submit:hover {
+            background-color: #1a365d;
+        }
+
+        /* Content Grid */
+        .content-grid {
+            display: flex;
+            gap: 20px;
+        }
+
+        .output-card {
+            flex: 1;
+            background: white;
+            border: 1px solid #e2e8f0;
+            padding: 20px;
+            border-radius: 12px;
+            min-height: 300px;
+            display: flex;
+            flex-direction: column;
         }
 
         .textbox {
-            border: 1px solid black;
-            margin: 5px;
-            padding: 5px;
-            width: 100%;
-            border-radius: 10px;
-            min-height: 30px;
+            font-size: 15px;
+            line-height: 1.7;
+            color: #2d3748;
+            white-space: pre-wrap;
+            word-wrap: break-word;
         }
 
-        #response {
-            margin-top: 20px;
-            white-space: pre-wrap;
+        @keyframes fadeIn {
+            from {
+                opacity: 0;
+                transform: translateY(5px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        .nav-link {
+            display: inline-block;
+            margin-bottom: 20px;
+            color: #2b6cb0;
+            text-decoration: none;
+            font-size: 14px;
+            font-weight: 600;
+        }
+
+        @media (max-width: 768px) {
+            .content-grid {
+                flex-direction: column;
+            }
         }
     </style>
 </head>
 <body>
-<h1>Chatbot</h1>
-<label for="prompt">prompt</label><textarea id="prompt" rows="5" cols="60">
-คนไข้มะเร็งควรกินอะไรบ้างระหว่างทำคีโม</textarea><br><br>
-<button id="submit">Submit</button>
-<div id="content" style="display:flex">
-    <div class="outerbox">
-        <h1>Response Stream</h1>
-        <div id="word-container" class="textbox"></div>
+
+<div class="container">
+    <a href="/llm/home" class="nav-link">← กลับหน้าหลัก</a>
+
+    <div class="header-area">
+        <h1>🤖 ทดสอบระบบ Chatbot</h1>
+        <p style="color: #718096;">พิมพ์ข้อความเพื่อทดสอบการตอบโต้ของ AI</p>
     </div>
-    <div class="outerbox">
-        <h1>Final Response</h1>
-        <div id="response" class="textbox"></div>
+
+    <div class="input-section">
+        <label for="prompt">ข้อความคำถาม (Prompt)</label>
+        <textarea id="prompt" placeholder="เช่น คนไข้มะเร็งควรกินอะไรบ้างระหว่างทำคีโม...">คนไข้มะเร็งควรกินอะไรบ้างระหว่างทำคีโม</textarea>
+        <button id="submit">ส่งคำถาม</button>
+    </div>
+
+    <div class="content-grid">
+        <div class="output-card">
+            <h2>📄 Response</h2>
+            <div id="response" class="textbox">
+                <span style="color: #a0aec0; font-style: italic;">รอสรุปผลลัพธ์สุดท้าย...</span>
+            </div>
+        </div>
     </div>
 </div>
 
 <script>
-    const socket = io('/llm');
-    socket.emit("test_connection");
-
-    socket.on('connect', function () {
-        console.log('Connected to server');
-    });
-
-    socket.on('new_word', function (word) {
-        console.log("new_word: " + word);
-        const wordContainer = document.getElementById('word-container');
-        const wordElement = document.createElement('span');
-        wordElement.textContent = word + ' ';
-        wordContainer.appendChild(wordElement);
-    });
-
     document.getElementById('submit').addEventListener('click', async () => {
         const prompt = document.getElementById('prompt').value;
         const responseDiv = document.getElementById('response');
-        const wordContainer = document.getElementById('word-container');
-        responseDiv.textContent = "Generating...";
-        wordContainer.textContent = "";
+
+        responseDiv.innerHTML = '<span style="color: #3182ce;">🔄 กำลังประมวลผล...</span>';
 
         try {
             const response = await fetch('generate', {
@@ -87,12 +196,13 @@
             if (response.ok) {
                 responseDiv.textContent = data;
             } else {
-                responseDiv.textContent = `Error: ${data.error}`;
+                responseDiv.innerHTML = `<span style="color: #c53030;">❌ Error: ${data.error}</span>`;
             }
         } catch (error) {
-            responseDiv.textContent = `Error: ${error.message}`;
+            responseDiv.innerHTML = `<span style="color: #c53030;">❌ Error: ${error.message}</span>`;
         }
     });
 </script>
+
 </body>
 </html>

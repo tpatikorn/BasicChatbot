@@ -7,7 +7,7 @@ from linebot.v3.messaging import (
 )
 from pydantic import StrictStr
 
-from manager.database_manager import SingleConnection
+from manager.database_manager import SingleConnection, log_chat
 from manager.util import to_date_str
 
 _configuration = Configuration(access_token=os.getenv("LINE_BOT_ACCESS_TOKEN"))
@@ -91,3 +91,14 @@ def datetime_message(reply_token, text):
                     mode=StrictStr("datetime"))]))
 
     reply_message(reply_token=reply_token, content=date_picker)
+
+
+
+def plain_text_reply_and_log(response_message, model_name, user_id, original_text, reply_token):
+    log_chat(user_id, message=original_text, response=response_message, model_name=model_name)
+    reply_message(reply_token=reply_token, content=response_message)
+
+
+def plain_text_push_and_log(push_text, model_name, user_id, original_text):
+    log_chat(user_id, message=original_text, response=push_text, model_name=model_name)
+    push_message(user_id=user_id, message=push_text)

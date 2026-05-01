@@ -1,0 +1,243 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>จัดการการเตือนกินยา</title>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Sarabun:wght@300;400;600&display=swap');
+
+        body {
+            font-family: 'Sarabun', sans-serif;
+            background-color: #f0f2f5;
+            color: #333;
+            margin: 0;
+            padding: 20px;
+            display: flex;
+            justify-content: center;
+        }
+
+        .container {
+            background-color: #ffffff;
+            max-width: 800px;
+            width: 100%;
+            padding: 30px;
+            border-radius: 12px;
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.08);
+        }
+
+        h1 { color: #1a365d; text-align: center; margin-bottom: 30px; font-size: 24px; }
+        h2 { font-size: 18px; color: #2c5282; margin-top: 40px; border-bottom: 1px solid #e2e8f0; padding-bottom: 8px; }
+
+        /* Form Styling */
+        form {
+            display: grid;
+            gap: 15px;
+            background: #f8fafc;
+            padding: 20px;
+            border-radius: 10px;
+            border: 1px solid #e2e8f0;
+            margin-bottom: 30px;
+        }
+
+        .form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+        label { font-weight: 600; font-size: 14px; color: #4a5568; margin-bottom: 2px; display: block; }
+        input, select {
+            width: 100%; padding: 10px; border: 1px solid #cbd5e0; border-radius: 6px; font-family: 'Sarabun'; box-sizing: border-box;
+        }
+
+        input[type="submit"] {
+            background-color: #2b6cb0; color: white; border: none; padding: 12px;
+            border-radius: 6px; font-weight: 600; cursor: pointer; transition: 0.3s; margin-top: 10px;
+        }
+
+        input[type="submit"]:hover { background-color: #1a365d; }
+
+        /* Medicine Card Styling */
+        .med-card {
+            border: 1px solid #e2e8f0;
+            border-radius: 10px;
+            padding: 20px;
+            margin-bottom: 15px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.04);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            transition: transform 0.2s;
+        }
+
+        .med-card:hover { transform: scale(1.01); }
+        .card-content { display: flex; flex-direction: column; gap: 4px; }
+
+        .display-time {
+            font-size: 20px;
+            font-weight: 700;
+            color: #2b6cb0;
+        }
+
+        .display-medicine {
+            font-size: 17px;
+            font-weight: 600;
+            color: #1a365d;
+        }
+
+        .display-details {
+            font-size: 15px;
+            color: #4a5568;
+        }
+
+        /* Status Colors */
+        .status-ending-soon { background-color: #e2f9e1 !important; border-color: #b7ebb3; } /* สิ้นสุดภายใน 7 วัน */
+        .status-canceled { background-color: #ffe5e5 !important; border-color: #fabebf; } /* ยกเลิก */
+        .status-normal { background-color: #ffffff; }
+
+        .btn-cancel {
+            background-color: #fff; color: #c53030; border: 1px solid #feb2b2;
+            padding: 8px 15px; border-radius: 6px; cursor: pointer; font-weight: 600;
+        }
+
+        .btn-cancel:hover { background-color: #c53030; color: white; }
+
+        .text-muted { color: #a0aec0; font-size: 14px; text-align: center; margin: 20px 0; }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <h1>💊 ระบบจัดการการเตือนกินยา</h1>
+
+    {% if message %}
+        <div style="background:#ebf8ff; color:#2c5282; padding:15px; border-radius:8px; margin-bottom:20px;">
+            ✨ {{ message }}
+        </div>
+    {% endif %}
+
+    <form action="/llm/add_med_reminder" method="post">
+        <div>
+            <label>เลือกผู้ป่วย</label>
+            <select name="user_id" required>
+                <option selected disabled value="">เลือกบัญชีผู้ใช้...</option>
+                {% for user in users %}
+                    <option value="{{ user['user_id'] }}">{{ user['display_name'] }}</option>
+                {% endfor %}
+            </select>
+        </div>
+
+        <div class="form-row">
+            <div>
+                <label>ชื่อยา</label>
+                <input type="text" name="medicine" placeholder="เช่น ยาฆ่าเชื้อ" required>
+            </div>
+            <div>
+                <label>เวลาที่ต้องทาน</label>
+                <input type="time" name="remind_time" required>
+            </div>
+        </div>
+
+        <div>
+            <label>รายละเอียด/คำแนะนำ</label>
+            <input type="text" name="description" placeholder="เช่น ทานหลังอาหารทันที">
+        </div>
+
+        <div class="form-row">
+            <div>
+                <label>วันที่เริ่มทาน</label>
+                <input type="date" name="start_date" required>
+            </div>
+            <div>
+                <label>วันที่สิ้นสุด</label>
+                <input type="date" name="end_date" required>
+            </div>
+        </div>
+
+        <input type="submit" value="เพิ่มการแจ้งเตือนยา">
+    </form>
+
+    <div id="reminder-lists">
+        <h2>🔔 รายการยาที่ต้องทาน (ปัจจุบัน)</h2>
+        {% for med_reminder in med_reminders|selectattr('enabled')|rejectattr('passed') %}
+            <div class="med-card status-normal med-item" data-end="{{ med_reminder.end_date }}">
+                <div class="card-content">
+                    <div class="display-time">⏰ {{ med_reminder.remind_time }} น. (ทุกวัน)</div>
+                    <div class="display-medicine">ยา: {{ med_reminder.medicine }} - สำหรับ {{ med_reminder.display_name }}</div>
+                    <div class="display-details">📝 {{ med_reminder.description }}</div>
+                    <div class="display-details" style="font-size: 13px; color: #718096;">
+                        ช่วงวันที่: <span class="format-date" data-date="{{ med_reminder.start_date }}"></span>
+                        ถึง <span class="format-date" data-date="{{ med_reminder.end_date }}"></span>
+                    </div>
+                </div>
+                <button class="btn-cancel" onclick="cancel_med_reminder({{ med_reminder.id }})">ยกเลิก</button>
+            </div>
+        {% else %}
+            <p class="text-muted">ไม่มีรายการแจ้งเตือนยาในขณะนี้</p>
+        {% endfor %}
+
+        <h2>✅ รายการยาที่สิ้นสุดช่วงเวลาแล้ว</h2>
+        {% for med_reminder in med_reminders|selectattr('enabled')|selectattr('passed') %}
+            <div class="med-card" style="opacity: 0.6; background: #f8fafc;">
+                <div class="card-content">
+                    <div class="display-time" style="color: #718096;">⏰ {{ med_reminder.remind_time }} น.</div>
+                    <div class="display-medicine">{{ med_reminder.medicine }} - สำหรับ {{ med_reminder.display_name }}</div>
+                    <div class="display-details">สิ้นสุดเมื่อ: <span class="format-date" data-date="{{ med_reminder.end_date }}"></span></div>
+                </div>
+            </div>
+        {% endfor %}
+
+        <h2>❌ รายการที่ถูกยกเลิก</h2>
+        {% for med_reminder in med_reminders|rejectattr('enabled') %}
+            <div class="med-card status-canceled">
+                <div class="card-content">
+                    <div class="display-time" style="color: #a0aec0; text-decoration: line-through;">⏰ {{ med_reminder.remind_time }} น.</div>
+                    <div class="display-medicine" style="color: #a0aec0; text-decoration: line-through;">{{ med_reminder.medicine }} - {{ med_reminder.display_name }}</div>
+                    <div class="display-details" style="color: #a0aec0;">(ยกเลิกการเตือนแล้ว)</div>
+                </div>
+            </div>
+        {% endfor %}
+    </div>
+</div>
+
+<script>
+    // แปลงวันที่ YYYY-MM-DD เป็นรูปแบบไทย
+    function formatThaiDateShort(dateStr) {
+        if (!dateStr) return "";
+        const date = new Date(dateStr);
+        return date.toLocaleDateString('th-TH', {
+            day: 'numeric',
+            month: 'short',
+            year: 'numeric'
+        });
+    }
+
+    document.addEventListener("DOMContentLoaded", function() {
+        const now = new Date();
+        const sevenDaysLater = new Date();
+        sevenDaysLater.setDate(now.getDate() + 7);
+
+        // จัดรูปแบบวันที่ทั้งหมด
+        document.querySelectorAll('.format-date').forEach(el => {
+            el.innerText = formatThaiDateShort(el.getAttribute('data-date'));
+        });
+
+        // ตรวจสอบยาที่กำลังจะหมดช่วงทาน (ภายใน 7 วัน) ให้เป็นสีเขียว
+        document.querySelectorAll('.med-item').forEach(card => {
+            const endDate = new Date(card.getAttribute('data-end'));
+            if (endDate <= sevenDaysLater && endDate >= now) {
+                card.classList.remove('status-normal');
+                card.classList.add('status-ending-soon');
+            }
+        });
+    });
+
+    function cancel_med_reminder(med_reminder_id) {
+        if(confirm("ยืนยันการยกเลิกการแจ้งเตือนยานี้?")) {
+            fetch("/llm/cancel_med_reminder", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ med_reminder_id: med_reminder_id })
+            }).then(() => window.location.reload());
+        }
+    }
+</script>
+
+</body>
+</html>

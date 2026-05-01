@@ -9,29 +9,31 @@ from apscheduler.schedulers.background import BackgroundScheduler
 from flask import Flask, request, abort, Blueprint, jsonify, render_template, session, redirect, url_for
 from flask_socketio import SocketIO
 from google import genai
-from google.genai.errors import ClientError
+from google.genai.errors import ClientError, ServerError
 from linebot.v3 import WebhookHandler
 from linebot.v3.exceptions import InvalidSignatureError
 from linebot.v3.webhooks import MessageEvent, TextMessageContent, PostbackEvent
+from werkzeug.security import check_password_hash
 
-from constants import ReminderState
-from manager.database_manager import log_chat
-from manager.helper_line import reply_message, show_loading, fetch_line_profile, fetch_all_users, push_message, \
-    upsert_line_profile
+from constants import ReminderState, SystemMessage
+from manager.database_manager import SingleConnection, log_chat
+from manager.helper_line import reply_message, show_loading, fetch_line_profile, fetch_all_users, upsert_line_profile, \
+    plain_text_reply_and_log, plain_text_push_and_log
 from manager.reminder_manager import create_reminder, set_session, get_session, check_for_notification, insert_reminder
-from manager.telenursing_manager import fetch_all_telenursing, insert_telenursing, cancel_telenursing
-from manager.util import str_to_date, formatted_thai_date
+from manager.telenursing_manager import fetch_all_telenursing, insert_telenursing, cancel_telenursing, \
+    insert_med_reminder, fetch_all_med_reminders, cancel_med_reminder
+from manager.util import str_to_date, formatted_thai_date, str_to_time
 
 # need to do this so that the code can be run from any current working directory
 # otherwise the CLI may use current working directory instead of using
 # the relative project path
 script_dir = os.path.dirname(os.path.abspath(__file__))
 
-bp = Blueprint('llm', __name__, template_folder='templates', static_folder='static', root_path="llm")
+bp = Blueprint('llm', __name__, template_folder='templates', static_folder='static')
 env = dotenv.load_dotenv()
 
 gemini_client = genai.Client(api_key=os.getenv('GEMINI_API_KEY'))
-handler = WebhookHandler(os.getenv("LINE_BOT_CHANNEL_SECRET"))
+handler = WebhookHandler(os.getenv("LINE_BOT_CHANNEL_SECRET", "DEFAULT SECRET"))
 
 app = Flask(__name__)
 scheduler = BackgroundScheduler()
@@ -49,7 +51,7 @@ memory = "Nothing."
 recognizer = sr.Recognizer()
 stop_listening = False
 
-socketio = SocketIO(app)
+socketio = SocketIO(app, path='/llm/socket.io', cors_allowed_origins="*")
 
 SOCKET_NAMESPACE = "/llm"
 
@@ -73,16 +75,15 @@ def process_prompt(prompt):
             final_text = ""
             for r in result:
                 r = r.text
-                # print(r, end=" ")
+                print(r, end=" ")
                 final_text += r
                 socketio.emit('new_word', r, namespace=SOCKET_NAMESPACE)
                 socketio.sleep(0)  # force the server to flush the socketio. DO NOT REMOVE
             # print()
-            # Assuming the result is a list of dictionaries
-            # print
             return final_text
-        except ClientError as e:
-            print(datetime.now(), e.message)
+        except (ClientError, ServerError) as e:
+            print(datetime.now().strftime("%d/%m/%Y, %H:%M:%S"), e.message)
+            log_chat("System", prompt, e.message, MODEL_LIST[CURRENT_MODEL_INDEX])
             CURRENT_MODEL_INDEX += 1
     return "ขออภัยค่ะ ระบบหนูกำลังได้รับการปรับปรุงอยู่นะคะ เดี๋ยวหนูจะกลับมาใหม่นะ ไม่เกิน 1 วันหนูสัญญา <3"
 
@@ -121,11 +122,6 @@ def callback_post():
     return 'OK'
 
 
-def plain_text_reply_and_log(response_message, model_name, user_id, original_text, reply_token):
-    log_chat(user_id, message=original_text, response=response_message, model_name=model_name)
-    reply_message(reply_token=reply_token, content=response_message)
-
-
 @handler.add(MessageEvent, message=TextMessageContent)
 def handle_message(event):
     if event.message.type == "text":
@@ -157,9 +153,10 @@ def handle_message(event):
         elif (user['admin'] == 1) and event_text == os.getenv("PASSCODE"):
             plain_text_reply_and_log(
                 "เพื่อเข้าสู่ admin menu\n"
-                "1. ไปยัง https://tpatikorn.com/llm/ เพื่อใส่ PASSOCDE หากใส่ไม่ถูกต้องจะใช้เมนูอื่นไม่ได้\n"
+                "1. ไปยัง https://tpatikorn.com/llm/ เพื่อใส่ PASSCODE หากใส่ไม่ถูกต้องจะใช้เมนูอื่นไม่ได้\n"
                 "2. ไปยัง https://tpatikorn.com/llm/chatbot เพื่อใช้ chatbot ผ่านทางหน้าเว็ป\n"
-                "3. ไปยัง https://tpatikorn.com/llm/telenursing เพื่อจัดการ telenursing",
+                "3. ไปยัง https://tpatikorn.com/llm/telenursing เพื่อจัดการ telenursing\n"
+                "4. ไปยัง https://tpatikorn.com/llm/med_reminder เพื่อจัดการการแจ้งเตือนยา",
                 "default response",
                 event.source.user_id, event.message.text, event.reply_token)
         elif str_to_date(user['end_date']) < datetime.today().date():
@@ -216,16 +213,40 @@ def log_request():
     print("Incoming request:", request.method, request.path)
 
 
-@bp.route('/')
+@bp.route('/home')
 def home():
+    if not session.get('logged_in'):
+        return render_template('login.html',
+                               message=SystemMessage.PASSCODE_INCORRECT)
     return render_template('home.html')
+
+
+@bp.route('/')
+@bp.route('login', methods=['GET', 'POST'])
+def login():
+    if request.method == 'POST':
+        username = request.form.get('username')
+        password = request.form.get('password', default="")
+
+        with SingleConnection() as con:
+            admin = con.execute("SELECT * FROM admin_auth WHERE username = %s", (username,)).fetchone()
+            print(admin)
+
+            if admin and check_password_hash(admin['password_hash'], password):
+                session['logged_in'] = True
+                session['username'] = admin['username']
+                return redirect(url_for('llm.home'))
+            else:
+                return render_template('login.html', message=SystemMessage.PASSCODE_INCORRECT)
+
+    return render_template('login.html')
 
 
 @bp.route('chatbot')
 def chatbot():
-    if session.get('passcode') != os.getenv("PASSCODE"):
-        return render_template('home.html',
-                               message="passcode incorrect. Please input the correct passcode to use the admin tool.")
+    if not session.get('logged_in'):
+        return render_template('login.html',
+                               message=SystemMessage.PASSCODE_INCORRECT)
     return render_template('chatbot.html')
 
 
@@ -236,22 +257,22 @@ def privacy():
 
 @bp.route('telenursing')
 def telenursing(message=None):
-    if session.get('passcode') != os.getenv("PASSCODE"):
-        return render_template('home.html',
-                               message="passcode incorrect. Please input the correct passcode to use the admin tool.")
-    users = fetch_all_users()
-    telenursing_meetings = fetch_all_telenursing()
-
-    return render_template('telenurse.html', users=users, telenursing=telenursing_meetings, message=message)
+    if not session.get('logged_in'):
+        return render_template('login.html',
+                               message=SystemMessage.PASSCODE_INCORRECT)
+    return render_template('telenursing.html',
+                           users=fetch_all_users(),
+                           telenursing=fetch_all_telenursing(),
+                           message=message)
 
 
 @bp.route('add_telenursing', methods=['POST'])
 def add_telenursing():
-    if session.get('passcode') != os.getenv("PASSCODE"):
-        return render_template('home.html',
-                               message="passcode incorrect. Please input the correct passcode to use the admin tool.")
+    if not session.get('logged_in'):
+        return render_template('login.html',
+                               message=SystemMessage.PASSCODE_INCORRECT)
     user_id = request.form.get('user_id')
-    meeting_dt = datetime.fromisoformat(request.form.get('meeting_dt'))
+    meeting_dt = datetime.fromisoformat(request.form.get('meeting_dt', default=""))
     meeting_url = request.form.get('meeting_url')
     description = request.form.get('description')
     try:
@@ -259,8 +280,8 @@ def add_telenursing():
                                        description=description)
         reply_text = insert_reminder(user_id=user_id, target_dt=meeting_dt, title=f"telenursing {meeting_dt}",
                                      detail=f'{description}\n\nเข้าสู่ telenursing ได้ที่ {meeting_url}')
-        log_chat(user_id, message="scheduling from web UI", response=reply_text, model_name="automated message")
-        push_message(user_id=user_id, message=reply_text)
+        plain_text_push_and_log(push_text=reply_text, model_name="automated message",
+                                user_id=user_id, original_text="scheduling from web UI")
         if result_id > 0:
             return redirect(url_for("llm.telenursing", message="success"))
     except Exception as ex:
@@ -270,9 +291,9 @@ def add_telenursing():
 
 @bp.route('cancel_telenursing', methods=['POST'])
 def cancel_telenursing_endpoint():
-    if session.get('passcode') != os.getenv("PASSCODE"):
-        return render_template('home.html',
-                               message="passcode incorrect. Please input the correct passcode to use the admin tool.")
+    if not session.get('logged_in'):
+        return render_template('login.html',
+                               message=SystemMessage.PASSCODE_INCORRECT)
     telenursing_id = request.json.get('telenursing_id')
     try:
         # print(telenursing_id)
@@ -283,10 +304,52 @@ def cancel_telenursing_endpoint():
     return telenursing(message="Unknown error has occurred.")
 
 
-@bp.route('passcode', methods=["POST"])
-def passcode():
-    session['passcode'] = request.form.get('passcode')
-    return render_template('home.html', message="passcode set!")
+@bp.route('med_reminder')
+def med_reminder(message=None):
+    if not session.get('logged_in'):
+        return render_template('login.html',
+                               message=SystemMessage.PASSCODE_INCORRECT)
+    users = fetch_all_users()
+    med_reminders = fetch_all_med_reminders()
+
+    return render_template('med_reminder.html', users=users, med_reminders=med_reminders, message=message)
+
+
+@bp.route('add_med_reminder', methods=['POST'])
+def add_med_reminder():
+    if not session.get('logged_in'):
+        return render_template('login.html',
+                               message=SystemMessage.PASSCODE_INCORRECT)
+    user_id = request.form.get('user_id', default="")
+    medicine = request.form.get('medicine', default="")
+    description = request.form.get('description', default="")
+    start_date = str_to_date(request.form.get('start_date', default=""))
+    end_date = str_to_date(request.form.get('end_date', default=""))
+    remind_time = str_to_time(request.form.get('remind_time', default=""))
+
+    try:
+        result_id = insert_med_reminder(user_id=user_id, medicine=medicine, description=description,
+                                        start_date=start_date, end_date=end_date, remind_time=remind_time)
+        if result_id > 0:
+            return redirect(url_for("llm.med_reminder", message="success"))
+    except Exception as ex:
+        return redirect(url_for("llm.med_reminder", message=str(ex)))
+    return redirect(url_for("llm.med_reminder", message="Unknown error has occurred."))
+
+
+@bp.route('cancel_med_reminder', methods=['POST'])
+def cancel_med_reminder_endpoint():
+    if not session.get('logged_in'):
+        return render_template('login.html',
+                               message=SystemMessage.PASSCODE_INCORRECT)
+    med_reminder_id = request.json.get('med_reminder_id')
+    try:
+        # print(med_reminder_id)
+        cancel_med_reminder(med_reminder_id)
+        med_reminder(message="success")
+    except Exception as ex:
+        return med_reminder(message=str(ex))
+    return med_reminder(message="Unknown error has occurred.")
 
 
 @socketio.on('test_connection', namespace=SOCKET_NAMESPACE)
@@ -328,4 +391,4 @@ app.config['APPLICATION_ROOT'] = ''
 app.config['SECRET_KEY'] = 'secret!'
 
 if __name__ == "__main__":
-    app.run(debug=True, port=9004)
+    socketio.run(app, debug=True, port=9004, allow_unsafe_werkzeug=True)

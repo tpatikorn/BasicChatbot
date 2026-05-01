@@ -11,8 +11,7 @@ time_regex = r'(\d{2}):(\d{2})'
 
 def str_to_date(s: str):
     # Match pattern: yyyy-MM-dd
-    pattern = date_regex
-    match = re.search(pattern, s)
+    match = re.search(date_regex, s)
 
     if match:
         year, month, day = match.groups()
@@ -21,10 +20,19 @@ def str_to_date(s: str):
         raise ValueError("No valid date substring found in the input.")
 
 
+def str_to_time(s: str):
+    # Match pattern: hh:mm
+    match = re.search(time_regex, s)
+
+    if match:
+        hour, minute = match.groups()
+        return datetime.time(hour=int(hour), minute=int(minute))
+    else:
+        raise ValueError("No valid date substring found in the input.")
+
 def str_to_dt(s: str):
     # Match pattern: yyyy-MM-ddThh-mm
-    pattern = datetime_regex
-    match = re.search(pattern, s)
+    match = re.search(datetime_regex, s)
 
     if match:
         year, month, day, hour, minute = match.groups()
@@ -36,6 +44,8 @@ def str_to_dt(s: str):
 def to_date_str(dt: datetime.datetime | datetime.date) -> str:
     return dt.strftime("%Y-%m-%d")
 
+def to_time_str(dt: datetime.datetime | datetime.time) -> str:
+    return dt.strftime("%H:%M")
 
 def to_dt_str(dt: datetime.datetime) -> str:
     return dt.strftime("%Y-%m-%dT%H:%M")
@@ -47,4 +57,6 @@ def formatted_thai_dt(dt):
 def formatted_thai_date(dt):
     if isinstance(dt, str):
         dt = str_to_date(dt)
+    if isinstance(dt, datetime.date):
+        dt = datetime.datetime.combine(dt, datetime.time())
     return pythainlp.util.thai_strftime(dt_obj=dt, fmt="%Aที่ %-d %B %Y")

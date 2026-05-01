@@ -6,3 +6,7 @@ class ReminderState:
     EDIT_TITLE = 2001
     EDIT_DATETIME = 2002
     EDIT_DETAIL = 2003
+
+class SystemMessage:
+    PASSCODE_SET = "passcode set!"
+    PASSCODE_INCORRECT = "passcode incorrect. Please input the correct passcode to use the admin tool."
