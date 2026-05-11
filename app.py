@@ -152,11 +152,8 @@ def handle_message(event):
         # existing users
         elif (user['admin'] == 1) and event_text == os.getenv("PASSCODE"):
             plain_text_reply_and_log(
-                "เพื่อเข้าสู่ admin menu\n"
-                "1. ไปยัง https://tpatikorn.com/llm/ เพื่อใส่ PASSCODE หากใส่ไม่ถูกต้องจะใช้เมนูอื่นไม่ได้\n"
-                "2. ไปยัง https://tpatikorn.com/llm/chatbot เพื่อใช้ chatbot ผ่านทางหน้าเว็ป\n"
-                "3. ไปยัง https://tpatikorn.com/llm/telenursing เพื่อจัดการ telenursing\n"
-                "4. ไปยัง https://tpatikorn.com/llm/med_reminder เพื่อจัดการการแจ้งเตือนยา",
+                "ท่านสามารถเข้าสู่ระบบ admin ได้ที่ "
+                "https://tpatikorn.com/llm/ เพื่อทดลองใช้ chatbot ผ่านทางหน้าเว็บ จัดการ telenursing และจัดการการแจ้งเตือนยา",
                 "default response",
                 event.source.user_id, event.message.text, event.reply_token)
         elif str_to_date(user['end_date']) < datetime.today().date():

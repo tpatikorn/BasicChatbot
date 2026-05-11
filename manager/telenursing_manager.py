@@ -1,7 +1,7 @@
 import datetime
 
 from manager.database_manager import SingleConnection
-from manager.util import to_dt_str, to_date_str, to_time_str, str_to_date
+from manager.util import to_dt_str, to_date_str, to_time_str
 
 
 def fetch_all_telenursing():

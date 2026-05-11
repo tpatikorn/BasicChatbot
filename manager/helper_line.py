@@ -28,18 +28,19 @@ def fetch_line_profile(user_id):
         user = con.execute("SELECT * FROM users WHERE user_id = %s", (user_id,)).fetchone()
         return dict(user) if user else None
 
+
 # take user_id and return user_id, display_name, picture_url, and status_message
 def upsert_line_profile(user_id):
     with ApiClient(fetch_line_config()) as api_client:
         line_bot_api = MessagingApi(api_client)
         profile = line_bot_api.get_profile(user_id)
-        next_week = to_date_str((datetime.today() + timedelta(days=7)).date())
+        usage_expire = to_date_str((datetime.today() + timedelta(days=14)).date())
         with SingleConnection() as con:
             con.execute("INSERT INTO users (user_id, display_name, picture_url, status_message, end_date) "
                         "VALUES (%s, %s, %s, %s, %s) ON CONFLICT(user_id) "
-                        "DO UPDATE SET display_name=%s, picture_url=%s, status_message=%s;",
-                        (profile.user_id, profile.display_name, profile.picture_url, profile.status_message, next_week,
-                         profile.display_name, profile.picture_url, profile.status_message))
+                        "DO UPDATE SET display_name = EXCLUDED.display_name, picture_url = EXCLUDED.picture_url, status_message = EXCLUDED.status_message;",
+                        (profile.user_id, profile.display_name, profile.picture_url, profile.status_message,
+                         usage_expire))
             con.commit()
             # then return the updated one. Need to fetch for the end date
 
@@ -91,7 +92,6 @@ def datetime_message(reply_token, text):
                     mode=StrictStr("datetime"))]))
 
     reply_message(reply_token=reply_token, content=date_picker)
-
 
 
 def plain_text_reply_and_log(response_message, model_name, user_id, original_text, reply_token):
